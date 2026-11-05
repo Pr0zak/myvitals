@@ -80,8 +80,8 @@ const AREAS: Array<{
 <style scoped>
 .fa { margin: 18px 0; }
 .sect {
-  font-size: 1.35rem; font-weight: 400; color: #e9edf2;
-  margin: 0 0 12px; letter-spacing: -0.2px;
+  font-size: 17px; font-weight: 500; color: #ececf5;
+  margin: 0 0 10px; letter-spacing: -0.1px;
 }
 .grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
@@ -89,14 +89,15 @@ const AREAS: Array<{
 }
 .area {
   display: flex; align-items: center; gap: 10px;
-  background: #1b1c1f; border: 0; border-radius: 18px;
+  background: #181b27; border: 0; border-radius: 20px;
   padding: 14px; cursor: pointer; text-align: left; min-width: 0;
 }
 .ico { width: 20px; height: 20px; flex: none; }
 .meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .lab {
-  font-size: .88rem; color: #e9edf2;
+  font-size: .88rem; color: #ececf5;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.sub { font-size: .7rem; color: #8d949d; }
+.sub { font-size: .7rem; color: #9b9bb0; }
+.area:focus-visible { outline: 2px solid #28e6ff; outline-offset: 2px; }
 </style>

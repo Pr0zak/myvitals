@@ -265,6 +265,9 @@ fun WorkoutChartsScreen(
  * history in the user's timezone. Deriving any of it from the loaded
  * stats window is what made the streak change when the range chip did.
  */
+/** Flat 20dp surface, the Today-brief card: no border, no glow. */
+private val ChartCardShape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp)
+
 @Composable
 private fun ConsistencyCard(c: app.myvitals.sync.TrainingConsistency, neon: Boolean) {
     val card = if (neon) NeonMV.Card else MV.SurfaceContainer
@@ -276,10 +279,13 @@ private fun ConsistencyCard(c: app.myvitals.sync.TrainingConsistency, neon: Bool
     // which is the question the number is for.
     val rested = remember(c) { c.daysSinceByMuscle.entries.sortedByDescending { it.value } }
 
-    Card(colors = CardDefaults.cardColors(containerColor = card)) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = card),
+        shape = if (neon) ChartCardShape else CardDefaults.shape,
+    ) {
         Column(Modifier.padding(14.dp)) {
-            Text("CONSISTENCY", color = muted,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            Text("Consistency", color = if (neon) NeonMV.Ink else muted,
+                fontSize = 15.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(10.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 StatCell("${c.currentStreakDays}d", "current streak", ink, muted)
@@ -309,8 +315,7 @@ private fun ConsistencyCard(c: app.myvitals.sync.TrainingConsistency, neon: Bool
 
             if (rested.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
-                Text("DAYS RESTED", color = muted,
-                    fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                Text("Days rested", color = muted, fontSize = 12.sp)
                 Spacer(Modifier.height(4.dp))
                 for (chunk in rested.chunked(3)) {
                     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
@@ -348,10 +353,13 @@ private fun StatCell(value: String, label: String, ink: Color, muted: Color) {
 private fun OverviewCard(s: StrengthStats, neon: Boolean) {
     val card = if (neon) NeonMV.Card else MV.SurfaceContainer
     val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
-    Card(colors = CardDefaults.cardColors(containerColor = card)) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = card),
+        shape = if (neon) ChartCardShape else CardDefaults.shape,
+    ) {
         Column(Modifier.padding(14.dp)) {
-            Text("OVERVIEW · ${s.days}d", color = muted,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            Text("Overview, last ${s.days} days", color = if (neon) NeonMV.Ink else muted,
+                fontSize = 15.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                 Stat("Workouts", "${s.nWorkouts}", neon)
@@ -373,10 +381,13 @@ private fun OverviewCard(s: StrengthStats, neon: Boolean) {
 private fun DailyVolumeCard(s: StrengthStats, neon: Boolean) {
     val card = if (neon) NeonMV.Card else MV.SurfaceContainer
     val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
-    Card(colors = CardDefaults.cardColors(containerColor = card)) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = card),
+        shape = if (neon) ChartCardShape else CardDefaults.shape,
+    ) {
         Column(Modifier.padding(14.dp)) {
-            Text("DAILY VOLUME", color = muted,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            Text("Daily volume", color = if (neon) NeonMV.Ink else muted,
+                fontSize = 15.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(8.dp))
             if (s.daily.size < 2) {
                 Text("Not enough sessions yet.", color = muted, fontSize = 12.sp)
@@ -446,10 +457,13 @@ private fun DailyVolumeCard(s: StrengthStats, neon: Boolean) {
 private fun WeeklyVolumeCard(trend: List<StrengthWeeklyPoint>, neon: Boolean) {
     val card = if (neon) NeonMV.Card else MV.SurfaceContainer
     val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
-    Card(colors = CardDefaults.cardColors(containerColor = card)) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = card),
+        shape = if (neon) ChartCardShape else CardDefaults.shape,
+    ) {
         Column(Modifier.padding(14.dp)) {
-            Text("WEEKLY VOLUME · 16-WEEK MESOCYCLE", color = muted,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            Text("Weekly volume, 16-week mesocycle", color = if (neon) NeonMV.Ink else muted,
+                fontSize = 15.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(8.dp))
             // Same stable-keyless-producer discipline as DailyVolumeCard — a
             // single producer for the host's lifetime, data pushed via
@@ -492,10 +506,13 @@ private fun MuscleGroupCard(s: StrengthStats, neon: Boolean) {
     val ink = if (neon) NeonMV.Ink else MV.OnSurface
     val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
     val track = if (neon) NeonMV.Track else MV.SurfaceContainerLow
-    Card(colors = CardDefaults.cardColors(containerColor = card)) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = card),
+        shape = if (neon) ChartCardShape else CardDefaults.shape,
+    ) {
         Column(Modifier.padding(14.dp)) {
-            Text("VOLUME BY MUSCLE", color = muted,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            Text("Volume by muscle", color = if (neon) NeonMV.Ink else muted,
+                fontSize = 15.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(8.dp))
             if (s.perMuscle.isEmpty()) {
                 Text("—", color = muted, fontSize = 12.sp); return@Card
@@ -544,10 +561,13 @@ private fun ProgressionCard(s: StrengthStats, neon: Boolean) {
         mutableStateOf(s.progression.keys.firstOrNull() ?: "")
     }
     var menuOpen by remember { mutableStateOf(false) }
-    Card(colors = CardDefaults.cardColors(containerColor = card)) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = card),
+        shape = if (neon) ChartCardShape else CardDefaults.shape,
+    ) {
         Column(Modifier.padding(14.dp)) {
-            Text("WEIGHT PROGRESSION", color = muted,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            Text("Weight progression", color = if (neon) NeonMV.Ink else muted,
+                fontSize = 15.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(6.dp))
             Box {
                 TextButton(onClick = { menuOpen = true }) {
@@ -676,7 +696,7 @@ private fun ProgressionCard(s: StrengthStats, neon: Boolean) {
                         else -> "${fmtNum(shown.topWeightLb)} ${shape.unit}"
                     }
                     Text(
-                        "${fmtRecDate(shown.date)} · $value",
+                        "${fmtRecDate(shown.date)}, $value",
                         color = app.myvitals.ui.LocalAppTokens.current.onSurface,
                         fontSize = 12.sp,
                     )
@@ -756,10 +776,13 @@ private fun RecordsCard(records: List<StrengthRecord>, neon: Boolean) {
     val card = if (neon) NeonMV.Card else MV.SurfaceContainer
     val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
     val ink = if (neon) NeonMV.Ink else MV.OnSurface
-    Card(colors = CardDefaults.cardColors(containerColor = card)) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = card),
+        shape = if (neon) ChartCardShape else CardDefaults.shape,
+    ) {
         Column(Modifier.padding(14.dp)) {
-            Text("PERSONAL RECORDS", color = muted,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            Text("Personal records", color = if (neon) NeonMV.Ink else muted,
+                fontSize = 15.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(8.dp))
             for (r in records) {
                 Row(
@@ -787,7 +810,7 @@ private fun RecordsCard(records: List<StrengthRecord>, neon: Boolean) {
                             buildString {
                                 append(primary.first)
                                 fmtRecDate(primary.second).takeIf { it.isNotEmpty() }
-                                    ?.let { append(" · $it") }
+                                    ?.let { append(", $it") }
                             },
                             color = ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                         )
@@ -807,7 +830,7 @@ private fun RecordsCard(records: List<StrengthRecord>, neon: Boolean) {
                                 buildString {
                                     append(label)
                                     fmtRecDate(d).takeIf { it.isNotEmpty() }
-                                        ?.let { append(" · $it") }
+                                        ?.let { append(", $it") }
                                 },
                                 color = muted, fontSize = 11.sp,
                             )
@@ -848,10 +871,13 @@ internal fun BodyMapCard(muscles: Map<String, MuscleVolumeRow>, neon: Boolean) {
             PathParser().parsePathString(d).toPath() to muscleStatusColor(muscles[m]?.status, neon)
         }
     }
-    Card(colors = CardDefaults.cardColors(containerColor = card)) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = card),
+        shape = if (neon) ChartCardShape else CardDefaults.shape,
+    ) {
         Column(Modifier.padding(14.dp)) {
-            Text("MUSCLE BALANCE · 7-DAY", color = muted,
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            Text("Muscle balance, last 7 days", color = if (neon) NeonMV.Ink else muted,
+                fontSize = 15.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(8.dp))
             Canvas(
                 Modifier.fillMaxWidth()
@@ -897,9 +923,9 @@ private fun Stat(label: String, value: String, neon: Boolean) {
     val dim = if (neon) NeonMV.Muted else MV.OnSurfaceDim
     val ink = if (neon) NeonMV.Ink else MV.OnSurface
     Column {
-        Text(label, color = dim, fontSize = 10.sp,
-            fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Text(value, color = ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = dim, fontSize = 11.sp)
+        Text(value, color = ink, fontSize = 16.sp, fontWeight = FontWeight.Medium,
+            fontFamily = if (neon) app.myvitals.ui.neon.NeonNumberFamily else null)
     }
 }
 

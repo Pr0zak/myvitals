@@ -40,7 +40,7 @@ const geo = computed(() => {
     <svg :width="size" :height="size" :viewBox="`0 0 ${size} ${size}`" aria-hidden="true">
       <circle :cx="geo.c" :cy="geo.c" :r="geo.r" fill="none" stroke="#272a3b" :stroke-width="stroke" />
       <circle v-if="geo.f > 0" :cx="geo.c" :cy="geo.c" :r="geo.r" fill="none" :stroke="color"
-              :stroke-width="stroke * 2.1" stroke-linecap="round" opacity="0.22"
+              :stroke-width="stroke + 4" stroke-linecap="round" opacity="0.12"
               :stroke-dasharray="`${geo.circ * geo.f} ${geo.circ}`" :transform="`rotate(-90 ${geo.c} ${geo.c})`" />
       <circle v-if="geo.f > 0" :cx="geo.c" :cy="geo.c" :r="geo.r" fill="none" :stroke="color"
               :stroke-width="stroke" stroke-linecap="round"

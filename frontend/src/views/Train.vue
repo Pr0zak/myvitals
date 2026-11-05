@@ -19,9 +19,6 @@ import { api, activitiesYtd } from "@/api/client";
 import ActivityYearCalendar from "@/components/ActivityYearCalendar.vue";
 import ActivityIcon from "@/components/ActivityIcon.vue";
 import NeonPage from "@/components/neon/NeonPage.vue";
-import NeonHero from "@/components/neon/NeonHero.vue";
-import NeonRing from "@/components/neon/NeonRing.vue";
-import NeonEyebrow from "@/components/neon/NeonEyebrow.vue";
 import { fmtDistance, distanceVal, distanceUnit, fmtElevation } from "@/units";
 import type { ActivityYtd, YtdMetric,
   Activity, ActivityStats, StrengthWorkoutDetail, StrengthWeekVolume,
@@ -126,14 +123,30 @@ const setsTotal = computed(() => workout.value?.sets_total ?? 0);
 const exDone = computed(() => workout.value?.exercises_done ?? 0);
 const exTotal = computed(() => workout.value?.exercises_total ?? 0);
 
+/** The sub line under the split name in the hero legend. */
 const heroTag = computed(() => {
   const w = workout.value;
-  if (w?.status === "completed") return "Today · done";
-  if (w?.status === "skipped") return "Today · skipped";
-  if (exTotal.value === 1) return "Today · 1 exercise";
-  if (exTotal.value > 1) return `Today · ${exTotal.value} exercises`;
-  return "Today";
+  if (w?.status === "completed") return "Done";
+  if (w?.status === "skipped") return "Skipped";
+  if (exTotal.value === 1) return "1 exercise";
+  if (exTotal.value > 1) return `${exTotal.value} exercises`;
+  return isRest.value ? "Nothing planned" : null;
 });
+
+/** Hero rings, outer → inner: sets (lime), exercises (cyan). Arc geometry
+ *  only — both fractions are the server's own counters. A null fraction
+ *  draws the track alone, so "no plan" never reads as "zero done". */
+const RS = 176, RW = 13, RG = 4;
+const heroRings = computed(() =>
+  [
+    { color: LIME, f: setsTotal.value > 0 ? setsDone.value / setsTotal.value : null },
+    { color: CYAN, f: exTotal.value > 0 ? exDone.value / exTotal.value : null },
+  ].map((r, i) => {
+    const rad = RS / 2 - RW / 2 - i * (RW + RG);
+    const c = 2 * Math.PI * rad;
+    return { ...r, rad, c, off: r.f == null ? c : c * (1 - Math.max(0, Math.min(1, r.f))) };
+  }),
+);
 
 /** The plan's muscles: projection rows today's plan adds to. */
 const chips = computed<string[]>(() => {
@@ -152,11 +165,11 @@ const chips = computed<string[]>(() => {
 const cta = computed<{ label: string; muted: boolean; name?: string; suffix?: string }>(() => {
   const w = workout.value;
   if (w == null) return { label: "View", muted: true };
-  if (w.status === "completed") return { label: "Done · see review", muted: true };
-  if (w.status === "skipped") return { label: "Skipped · view", muted: true };
+  if (w.status === "completed") return { label: "See the review", muted: true };
+  if (w.status === "skipped") return { label: "View the skipped day", muted: true };
   if (isRest.value) return { label: "View", muted: true };
   const n = w.next_up;
-  if (n && n.started) return { label: "Continue", muted: false, name: n.name, suffix: `, set ${n.set_number}` };
+  if (n && n.started) return { label: "Continue", muted: false, name: n.name, suffix: `set ${n.set_number}` };
   if (n) return { label: "Start", muted: false };
   if (w.status === "in_progress" || w.status === "paused") return { label: "Resume", muted: false };
   return { label: "Start", muted: false };
@@ -312,7 +325,7 @@ const recent = computed<FeedRow[]>(() => {
       const cls = classifyType(a.type);
       const at = new Date(a.start_at!);
       const sub = [relDay(at), a.distance_m && a.distance_m > 0 ? fmtDistance(a.distance_m, 1)
-        : a.type ? titleCase(a.type) : ""].filter(Boolean).join(" · ");
+        : a.type ? titleCase(a.type) : ""].filter(Boolean).join(", ");
       const value = cls.isTrail && a.elevation_gain_m && a.elevation_gain_m > 0
         ? fmtElevation(a.elevation_gain_m) : hms(a.duration_s);
       return {
@@ -338,11 +351,6 @@ const tiles = [
 
 <template>
   <NeonPage title="Train" class="train-view">
-    <template #trailing>
-      <button v-if="weekCount != null" class="weekchip" @click="go('/activities')">
-        This week · {{ weekCount }}
-      </button>
-    </template>
 
     <button v-if="error" class="errbanner" type="button" @click="load">
       <b>Couldn't load Train</b>
@@ -350,67 +358,99 @@ const tiles = [
       <em>Tap to retry</em>
     </button>
 
-    <!-- 1. Session hero -->
-    <NeonHero v-if="loading && !workout" :accent="LIME" class="hero sk-hero" aria-busy="true">
+    <!-- 1. Session hero — on the page ground, the Today brief language:
+         rings left (sets outer, exercises inner), a legend right that carries
+         the words, then the one cyan action and the Mon–Sun dots. -->
+    <section v-if="loading && !workout" class="hero" aria-busy="true">
       <div class="hrow">
         <div class="sk sk-ring" />
-        <div class="hbody">
-          <div class="sk" style="width: 110px; height: 11px" />
-          <div class="sk" style="width: 80%; height: 26px; margin-top: 8px" />
-          <div class="chips"><div class="sk" style="width: 54px; height: 18px" /><div class="sk" style="width: 64px; height: 18px" /></div>
+        <div class="hlegend">
+          <div class="sk" style="width: 70%; height: 40px" />
+          <div class="sk" style="width: 60%; height: 40px" />
+          <div class="sk" style="width: 80%; height: 40px" />
         </div>
       </div>
-      <div class="sk" style="height: 48px; margin-top: 14px; border-radius: 14px" />
-      <div class="dots"><div v-for="i in 7" :key="i" class="sk" style="width: 14px; height: 14px; border-radius: 7px" /></div>
-    </NeonHero>
-    <NeonHero v-else-if="!(error && !workout)" :accent="LIME" class="hero">
+      <div class="sk" style="height: 48px; margin-top: 18px; border-radius: 14px" />
+    </section>
+    <section v-else-if="!(error && !workout)" class="hero">
       <div class="hrow">
-        <NeonRing
-          :fraction="setsTotal > 0 ? setsDone / setsTotal : 0"
-          :color="LIME" :size="120" :stroke="10"
-          :outer="exTotal > 0 ? exDone / exTotal : 0" :outer-color="CYAN"
-        >
-          <template v-if="setsTotal > 0">
-            <b class="rnum lime">{{ setsDone }}/{{ setsTotal }}</b>
-            <span class="rcap">Sets</span>
-            <span class="rex">{{ exDone }}/{{ exTotal }} ex</span>
-          </template>
-          <template v-else>
-            <b class="rnum mut">—</b>
-            <span class="rcap">{{ isRest ? "Rest" : "No sets" }}</span>
-          </template>
-        </NeonRing>
-        <div class="hbody">
-          <div class="tag" :class="{ mut: workout?.status === 'completed' }">{{ heroTag }}</div>
-          <h2>{{ isRest ? "Rest day" : titleCase(workout!.split_focus) }}</h2>
-          <div v-if="chips.length" class="chips">
-            <span v-for="m in chips" :key="m" class="chip" :style="{ '--c': muscleColor(m) }">{{ titleCase(m) }}</span>
+        <button class="hring" type="button" aria-label="Open today's workout" @click="go('/workout/strength/today')">
+          <svg :viewBox="`0 0 ${RS} ${RS}`" aria-hidden="true">
+            <g v-for="(r, i) in heroRings" :key="i" :transform="`rotate(-90 ${RS / 2} ${RS / 2})`">
+              <circle :cx="RS / 2" :cy="RS / 2" :r="r.rad" fill="none"
+                :stroke="r.color" stroke-opacity=".13" :stroke-width="RW" />
+              <template v-if="r.f">
+                <circle :cx="RS / 2" :cy="RS / 2" :r="r.rad" fill="none"
+                  :stroke="r.color" stroke-opacity=".12" :stroke-width="RW + 4"
+                  stroke-linecap="round" :stroke-dasharray="r.c" :stroke-dashoffset="r.off" />
+                <circle :cx="RS / 2" :cy="RS / 2" :r="r.rad" fill="none"
+                  :stroke="r.color" :stroke-width="RW"
+                  stroke-linecap="round" :stroke-dasharray="r.c" :stroke-dashoffset="r.off" />
+              </template>
+            </g>
+          </svg>
+          <span class="centre">
+            <span class="rnum num">{{ setsTotal > 0 ? `${setsDone}/${setsTotal}` : "—" }}</span>
+            <span class="rcap">{{ setsTotal > 0 ? "Sets" : isRest ? "Rest" : "No sets" }}</span>
+          </span>
+        </button>
+
+        <div class="hlegend">
+          <div class="lrow">
+            <span class="lbar" :style="{ background: LIME }" />
+            <span class="ltxt">
+              <span class="llab">Today</span>
+              <span class="lval">{{ isRest ? "Rest day" : titleCase(workout!.split_focus) }}</span>
+              <span v-if="heroTag" class="lsub">{{ heroTag }}</span>
+            </span>
+          </div>
+          <div class="lrow">
+            <span class="lbar" :style="{ background: CYAN }" />
+            <span class="ltxt">
+              <span class="llab">Exercises</span>
+              <span class="lval num">{{ exTotal > 0 ? `${exDone} of ${exTotal}` : "—" }}</span>
+              <span v-if="chips.length" class="lsub">{{ chips.slice(0, 3).map(titleCase).join(", ") }}</span>
+            </span>
+          </div>
+          <div v-if="cta.name" class="lrow">
+            <span class="lbar" :style="{ background: 'var(--rn-track)' }" />
+            <span class="ltxt">
+              <span class="llab">Up next</span>
+              <span class="lval small">{{ cta.name }}</span>
+              <span class="lsub">{{ cta.suffix }}</span>
+            </span>
           </div>
         </div>
       </div>
+
       <button class="cta" :class="{ muted: cta.muted }" type="button" @click="go('/workout/strength/today')">
-        <span class="cl">{{ cta.label }}</span>
-        <template v-if="cta.name"><span class="cl">&nbsp;·&nbsp;</span><span class="cn">{{ cta.name }}</span><span class="cl">{{ cta.suffix }}</span></template>
+        {{ cta.name ? `${cta.label} ${cta.suffix}` : cta.label }}
       </button>
       <div class="dots" role="img" :aria-label="dotsLabel">
         <div v-for="d in dots" :key="d.iso" class="dot" :class="d.state">
           <i />
-          <span :class="{ lime: d.today }">{{ d.label }}</span>
+          <span :class="{ now: d.today }">{{ d.label }}</span>
         </div>
       </div>
-    </NeonHero>
+      <!-- The old header pill, as the hero's quiet status line. -->
+      <button v-if="weekCount != null" class="status" type="button" @click="go('/activities')">
+        <span class="sdot" />
+        <span class="stext">{{ weekCount }} session{{ weekCount === 1 ? "" : "s" }} in the last 7 days</span>
+        <span class="sside">See all</span>
+      </button>
+    </section>
 
     <!-- 2. Weekly volume -->
     <template v-if="week">
-      <NeonEyebrow>This week's volume</NeonEyebrow>
+      <h2 class="sect">This week's volume</h2>
       <button class="card vol" type="button" @click="go('/workout/strength/charts')">
         <div class="vhead">
           <span class="vnum">{{ lb(week.total_lb) }}</span><span class="vunit">lb</span>
           <span class="delta" :class="delta.tone">{{ delta.text }}</span>
         </div>
         <div class="vsub">
-          vs {{ lb(week.prev_total_lb) }} lb the week before<template v-if="strengthSessions7d != null">
-            · {{ strengthSessions7d }} session{{ strengthSessions7d === 1 ? "" : "s" }}</template>
+          vs {{ lb(week.prev_total_lb) }} lb the week before<template v-if="strengthSessions7d != null">,
+            {{ strengthSessions7d }} session{{ strengthSessions7d === 1 ? "" : "s" }}</template>
         </div>
         <div class="bars" role="img" :aria-label="weekChartLabel">
           <div v-for="d in week.days" :key="d.date" class="bcol">
@@ -435,7 +475,7 @@ const tiles = [
 
     <!-- 3. Muscle volume vs MEV–MAV -->
     <template v-if="muscles && Object.keys(muscles).length">
-      <NeonEyebrow>Sets per muscle · last {{ muscleWindow }} days</NeonEyebrow>
+      <h2 class="sect">Sets per muscle, last {{ muscleWindow }} days</h2>
       <button class="card mus" type="button" @click="go('/workout/strength/history')">
         <div v-if="!trainedMuscles.length" class="vsub">No working sets logged in this window.</div>
         <div
@@ -463,7 +503,7 @@ const tiles = [
     <!-- 4. This year + calendar -->
     <template v-if="activities.length || workouts.length">
       <template v-if="ytdData">
-        <NeonEyebrow>This year</NeonEyebrow>
+        <h2 class="sect">This year</h2>
         <section class="ytd2">
           <button v-if="ytdMetric('sessions')" class="ycell" @click="go('/activities')">
             <span class="ylbl">Activities</span>
@@ -477,7 +517,7 @@ const tiles = [
           </button>
         </section>
       </template>
-      <NeonEyebrow>Activity calendar</NeonEyebrow>
+      <h2 class="sect">Activity calendar</h2>
       <section class="card calcard">
         <ActivityYearCalendar :activities="activities" :workouts="workouts" compact />
       </section>
@@ -485,8 +525,8 @@ const tiles = [
 
     <!-- 5. Recent feed -->
     <div class="caprow">
-      <NeonEyebrow>Recent · last 7 days</NeonEyebrow>
-      <button class="see-all" @click="go('/activities')">See all ›</button>
+      <h2 class="sect">Last 7 days</h2>
+      <button class="see-all" @click="go('/activities')">See all</button>
     </div>
     <template v-if="loading && !activities.length">
       <div class="sk" style="height: 68px; border-radius: 22px; margin-bottom: 11px" />
@@ -508,7 +548,7 @@ const tiles = [
     </button>
 
     <!-- 6. Tile grid -->
-    <NeonEyebrow>More</NeonEyebrow>
+    <h2 class="sect">More</h2>
     <nav class="tiles">
       <button v-for="t in tiles" :key="t.label" class="tile" type="button"
               :aria-label="`Open ${t.label}`" @click="go(t.to)">
@@ -529,11 +569,6 @@ const tiles = [
 </template>
 
 <style scoped>
-.weekchip {
-  font-family: "Space Grotesk", "Geist Mono", monospace; font-weight: 700; font-size: 13px;
-  color: var(--rn-lime); background: rgba(93, 255, 59, 0.12); border: 1px solid rgba(93, 255, 59, 0.25);
-  padding: 5px 12px; border-radius: 20px; cursor: pointer;
-}
 .errbanner {
   display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; cursor: pointer;
   background: rgba(255, 93, 122, 0.10); border: 1px solid rgba(255, 93, 122, 0.28); border-radius: 14px;
@@ -542,52 +577,64 @@ const tiles = [
 .errbanner b { color: var(--rn-bad); font-size: 13px; }
 .errbanner em { font-style: normal; color: var(--rn-cyan); font-weight: 600; }
 
-/* Hero */
-.hrow { display: flex; align-items: center; gap: 16px; }
-.hbody { flex: 1; min-width: 0; }
-.tag { font-family: "Space Grotesk", "Geist Mono", monospace; font-size: 11px; font-weight: 700;
-  letter-spacing: .12em; text-transform: uppercase; color: var(--rn-lime); }
-.tag.mut { color: var(--rn-mut); }
-.hero h2 { margin: 4px 0 0; font-size: 26px; line-height: 1.1; font-weight: 800; letter-spacing: -0.5px; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.chip { font-size: 11px; font-weight: 700; color: var(--c); padding: 3px 8px; border-radius: 10px;
-  background: color-mix(in srgb, var(--c) 14%, transparent); border: 1px solid color-mix(in srgb, var(--c) 35%, transparent); }
-.rnum { font-family: "Space Grotesk", "Geist Mono", monospace; font-size: 22px; font-weight: 700; }
-.rcap { font-size: 9px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--rn-mut); }
-.rex { font-family: "Space Grotesk", "Geist Mono", monospace; font-size: 10px; font-weight: 700; color: var(--rn-cyan); }
-.cta { display: flex; align-items: center; justify-content: center; width: 100%; height: 48px; margin-top: 14px; border-radius: 14px; cursor: pointer;
-  background: var(--rn-lime); border: 1px solid var(--rn-lime); color: var(--rn-onacc);
-  font: inherit; font-size: 15px; font-weight: 800; padding: 0 16px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 0 16px rgba(93, 255, 59, 0.35); }
-.cta .cl { flex: 0 0 auto; white-space: pre; }
-.cta .cn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cta.muted { background: var(--rn-card); border-color: var(--rn-track); color: var(--rn-mut); box-shadow: none; }
-.cta:focus-visible { outline: 2px solid var(--rn-cyan); outline-offset: 2px; }
-.dots { display: flex; justify-content: space-between; margin-top: 14px; }
+/* Hero — page ground, no card (the Today brief language) */
+.hero { margin: 4px 0 22px; }
+.hrow { display: flex; align-items: center; gap: 18px; }
+.hring { position: relative; flex: none; width: 176px; height: 176px; padding: 0; border: 0;
+  background: none; border-radius: 50%; cursor: pointer; color: inherit; }
+.hring svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.centre { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.rnum { font-family: "Space Grotesk", "Geist Mono", monospace; font-size: 2.1rem; font-weight: 500;
+  letter-spacing: -1px; line-height: 1; color: var(--rn-ink); font-variant-numeric: tabular-nums; }
+.rcap { font-size: .7rem; color: var(--rn-mut); margin-top: 4px; }
+.hlegend { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.lrow { display: flex; align-items: flex-start; gap: 10px; }
+.lbar { flex: none; width: 3px; height: 30px; margin-top: 5px; border-radius: 2px; }
+.ltxt { display: flex; flex-direction: column; min-width: 0; }
+.llab { font-size: .75rem; color: var(--rn-mut); }
+.lval { font-family: "Space Grotesk", "Geist Mono", monospace; font-size: 1.25rem; font-weight: 500;
+  line-height: 1.25; color: var(--rn-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lval.small { font-size: 1rem; }
+.lsub { font-size: .7rem; color: var(--rn-mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cta { display: block; width: 100%; height: 48px; margin-top: 18px; border-radius: 14px; cursor: pointer;
+  background: var(--rn-cyan); border: 0; color: var(--rn-onacc);
+  font: inherit; font-size: 15px; font-weight: 700; padding: 0 16px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cta.muted { background: var(--rn-card); color: var(--rn-mut); }
+.cta:focus-visible, .hring:focus-visible, .status:focus-visible { outline: 2px solid var(--rn-cyan); outline-offset: 2px; }
+.dots { display: flex; justify-content: space-between; margin-top: 16px; }
 .dot { width: 32px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .dot i { width: 10px; height: 10px; border-radius: 50%; background: var(--rn-track); margin: 2px; }
 .dot.done i, .dot.today-done i { width: 14px; height: 14px; margin: 0; background: var(--rn-lime); }
 .dot.today-done i { box-shadow: 0 0 0 2px var(--rn-bg), 0 0 0 3.5px var(--rn-ink); }
-.dot.today i { width: 14px; height: 14px; margin: 0; background: rgba(93, 255, 59, .18); box-shadow: inset 0 0 0 2px var(--rn-lime); }
+.dot.today i { width: 14px; height: 14px; margin: 0; background: transparent; box-shadow: inset 0 0 0 2px var(--rn-lime); }
 .dot.planned i { background: var(--rn-peri); }
-.dot span { font-family: "Space Grotesk", "Geist Mono", monospace; font-size: 10px; font-weight: 700; color: var(--rn-mut); }
+.dot span { font-size: 10px; color: var(--rn-mut); }
+.dot span.now { color: var(--rn-ink); font-weight: 700; }
+.status { display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 14px; padding: 0;
+  background: none; border: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+.sdot { width: 6px; height: 6px; border-radius: 3px; background: var(--rn-lime); flex: none; }
+.stext { font-size: .82rem; color: rgba(236, 236, 245, .85); }
+.sside { margin-left: auto; font-size: .75rem; color: var(--rn-mut); }
 .sk { background: linear-gradient(90deg, rgba(31, 41, 55, .5), rgba(93, 255, 59, .18), rgba(31, 41, 55, .5));
   background-size: 200% 100%; animation: sk 1.4s linear infinite; border-radius: 6px; }
-.sk-ring { width: 120px; height: 120px; border-radius: 50%; flex: 0 0 auto; }
+.sk-ring { width: 176px; height: 176px; border-radius: 50%; flex: 0 0 auto; }
 @keyframes sk { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* Section headings — sentence case, no tracked caps */
+.sect { font-size: 1.1rem; font-weight: 500; color: var(--rn-ink); margin: 26px 0 10px; letter-spacing: -0.1px; }
 
 /* Cards */
 .card { display: block; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer;
-  background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 18px; padding: 16px; }
+  background: var(--rn-card); border: 0; border-radius: 20px; padding: 16px; }
 .card:focus-visible { outline: 2px solid var(--rn-cyan); outline-offset: 2px; }
 .vhead { display: flex; align-items: baseline; gap: 4px; }
 .vnum { font-family: "Space Grotesk", "Geist Mono", monospace; font-size: 26px; font-weight: 700; }
 .vunit { color: var(--rn-mut); font-size: 12px; }
-.delta { margin-left: auto; font-family: "Space Grotesk", "Geist Mono", monospace; font-size: 12px; font-weight: 700;
-  padding: 3px 8px; border-radius: 10px; border: 1px solid currentColor; }
-.delta.lime { color: var(--rn-lime); background: rgba(93, 255, 59, .12); }
-.delta.amber { color: var(--rn-amber); background: rgba(255, 181, 46, .12); }
-.delta.mut { color: var(--rn-mut); background: rgba(155, 155, 176, .10); }
+.delta { margin-left: auto; font-family: "Space Grotesk", "Geist Mono", monospace; font-size: 13px; font-weight: 600; }
+.delta.lime { color: var(--rn-lime); }
+.delta.amber { color: var(--rn-amber); }
+.delta.mut { color: var(--rn-mut); }
 .vsub, .vnote { color: var(--rn-mut); font-size: 12px; }
 .vnote { font-size: 11px; margin-top: 6px; }
 .bars { display: flex; margin-top: 12px; }
@@ -595,7 +642,7 @@ const tiles = [
 .bstack { height: 96px; width: 100%; position: relative; border-bottom: 1px solid var(--rn-line); }
 .bstack .ghost, .bstack .bar { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); border-radius: 4px 4px 0 0; }
 .bstack .ghost { width: 62%; background: var(--rn-track); }
-.bstack .bar { width: 36%; background: var(--rn-lime); box-shadow: 0 0 8px rgba(93, 255, 59, .35); }
+.bstack .bar { width: 36%; background: var(--rn-lime); }
 .bcol span { font-family: "Space Grotesk", "Geist Mono", monospace; font-size: 10px; font-weight: 700;
   color: var(--rn-mut); padding-top: 6px; transform: translateY(100%); height: 0; }
 .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 22px; font-size: 11px; color: var(--rn-mut); }
@@ -610,9 +657,9 @@ const tiles = [
 .mband { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: rgba(93, 255, 59, .28); }
 .mdot { position: absolute; top: 50%; width: 9px; height: 9px; border-radius: 50%; transform: translate(-50%, -50%);
   background: var(--rn-mut); }
-.mdot.in_range { background: var(--rn-lime); box-shadow: 0 0 0 3px rgba(93, 255, 59, .3); }
-.mdot.under { background: var(--rn-peri); box-shadow: 0 0 0 3px rgba(111, 123, 255, .3); }
-.mdot.over { background: var(--rn-amber); box-shadow: 0 0 0 3px rgba(255, 181, 46, .3); }
+.mdot.in_range { background: var(--rn-lime); }
+.mdot.under { background: var(--rn-peri); }
+.mdot.over { background: var(--rn-amber); }
 .mval { width: 22px; font-family: "Space Grotesk", "Geist Mono", monospace; font-size: 13px; text-align: right; }
 .mval.in_range { color: var(--rn-lime); } .mval.under { color: var(--rn-peri); } .mval.over { color: var(--rn-amber); }
 .mrange { width: 40px; font-family: "Space Grotesk", "Geist Mono", monospace; font-size: 10px; color: var(--rn-mut); }
@@ -621,18 +668,18 @@ const tiles = [
 .ydelta.muted { color: var(--rn-mut, #9b9bb0); }
 .ytd2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .ycell { display: flex; flex-direction: column; gap: 4px; text-align: left; font: inherit; color: inherit; cursor: pointer;
-  background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 14px; padding: 12px 14px; }
-.ylbl { font-size: .66rem; letter-spacing: .12em; text-transform: uppercase; color: var(--rn-mut); font-weight: 700; }
+  background: var(--rn-card); border: 0; border-radius: 20px; padding: 12px 14px; }
+.ylbl { font-size: .75rem; color: var(--rn-mut); }
 .ynum { font-family: "Space Grotesk", "Geist Mono", monospace; font-size: 1.35rem; font-weight: 700; }
 .ynum em { font-style: normal; font-size: .8rem; color: var(--rn-mut); }
 .ydelta { font-size: .72rem; font-weight: 600; }
 .calcard { cursor: default; padding: 12px 14px; }
 
 /* Feed */
-.caprow { display: flex; align-items: center; justify-content: space-between; }
-.see-all { background: none; border: 0; padding: 2px 4px; cursor: pointer; color: var(--rn-cyan); font-size: 11px; font-weight: 700; }
+.caprow { display: flex; align-items: baseline; justify-content: space-between; }
+.see-all { background: none; border: 0; padding: 2px 4px; cursor: pointer; color: var(--rn-cyan); font-size: 12px; font-weight: 600; }
 .pill { display: flex; align-items: center; gap: 14px; width: 100%; background: var(--rn-card); border: 0;
-  border-radius: 22px; padding: 14px 16px; margin-bottom: 11px; cursor: pointer; color: inherit; text-align: left; font: inherit; }
+  border-radius: 20px; padding: 14px 16px; margin-bottom: 10px; cursor: pointer; color: inherit; text-align: left; font: inherit; }
 .pill .pi { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
 .pill .pn { flex: 1; min-width: 0; font-weight: 700; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pill .pn small { display: block; color: var(--rn-mut); font-weight: 500; font-size: 12px; margin-top: 2px;
@@ -643,7 +690,7 @@ const tiles = [
 /* Tiles */
 .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 8px; }
 .tile { min-height: 76px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
-  background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 18px; padding: 12px 6px;
+  background: var(--rn-card); border: 0; border-radius: 20px; padding: 12px 6px;
   cursor: pointer; color: var(--rn-ink); font: inherit; }
 .tile:focus-visible { outline: 2px solid var(--rn-cyan); outline-offset: 2px; }
 .tile .ti { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }

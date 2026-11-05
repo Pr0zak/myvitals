@@ -273,31 +273,23 @@ fun RingsContent(
             return@NeonScreen
         }
 
-        // Hero: weekly ring + saturated chips + actions, per the reference.
-        app.myvitals.ui.common.TodayHero(
+        // Hero: the tri-ring brief (readiness at the centre, sleep and move
+        // around it) with the vitals roll-up and sync age underneath. It
+        // replaces TodayHero + the Health status section, which between them
+        // showed readiness twice and steps three times above the fold.
+        app.myvitals.ui.common.TodayBrief(
             tiles = vitalTiles,
             week = week,
-            readiness = readiness?.score,
-            onOpen = onOpen,
-        )
-
-        // Weekly load, replacing the daily-goal framing for training. Sits
-        // directly under the hero because it answers the same question the
-        // ring does — "am I on track this week" — for effort rather than steps.
-        weeklyLoad()
-
-        // Health status: the roll-up + Readiness as a MetricCard. The old
-        // hero was a third card style stacked above the Focus pills and the
-        // Key metrics grid; readiness is a metric and now looks like one.
-        app.myvitals.ui.common.HealthStatus(
             readiness = readiness,
             rollup = rollup,
-            // Freshness belongs WITH the numbers it qualifies. As a bare
-            // Text between two sections it read as debug output.
             syncNote = summary?.lastSync?.let { iso ->
                 syncAgeMinutes(iso)?.let { "Synced ${fmtSyncAge(it)}" }
             },
+            onOpen = onOpen,
         )
+
+        // Weekly load answers "am I on track this week" for effort.
+        weeklyLoad()
 
         // Key metrics — one card vocabulary, mirroring KeyMetrics.vue.
         app.myvitals.ui.common.KeyMetrics(

@@ -83,23 +83,27 @@ fun WeeklyLoadCard(d: TrainingLoad, modifier: Modifier = Modifier) {
         else -> "Not enough history yet"
     }
 
+    // Heading sits above the card in sentence case, like every other section;
+    // the card itself is a flat surface — colour belongs to the bars and the
+    // verdict, not to a border around them.
+    Column(modifier.fillMaxWidth()) {
+    Text(
+        "Training load this week", color = NeonMV.Ink,
+        fontSize = 17.sp, fontWeight = FontWeight.Medium,
+        modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
+    )
     Column(
-        modifier
+        Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
             .background(NeonMV.Card)
-            .border(1.dp, tone.copy(alpha = 0.22f), RoundedCornerShape(20.dp))
-            .padding(14.dp),
+            .padding(16.dp),
     ) {
-        Text(
-            "TRAINING LOAD · THIS WEEK", color = NeonMV.Muted,
-            fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp,
-        )
-        Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 "%.0f".format(d.weekLoad), color = NeonMV.Ink,
-                fontSize = 38.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1.6).sp,
+                fontSize = 34.sp, fontWeight = FontWeight.Medium, letterSpacing = (-1).sp,
+                fontFamily = app.myvitals.ui.neon.NeonNumberFamily,
             )
             if (d.targetLow != null && d.targetHigh != null) {
                 Spacer(Modifier.width(8.dp))
@@ -110,7 +114,7 @@ fun WeeklyLoadCard(d: TrainingLoad, modifier: Modifier = Modifier) {
                 )
             }
         }
-        Text(verdict, color = tone, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(verdict, color = if (d.band == "under") NeonMV.Muted else tone, fontSize = 13.sp)
 
         // Per-day bars, scaled to the busiest day so a quiet week still reads.
         val peak = (d.daily.maxOfOrNull { it.load } ?: 0.0).coerceAtLeast(1.0)
@@ -178,6 +182,7 @@ fun WeeklyLoadCard(d: TrainingLoad, modifier: Modifier = Modifier) {
                 Text("over", color = NeonMV.Muted, fontSize = 9.sp)
             }
         }
+    }
     }
 }
 

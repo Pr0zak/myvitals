@@ -939,7 +939,18 @@ internal fun StrengthTodayContent(
             item(key = "chips") {
                 BannerChipStrip(plan = plan, coach = coach, onOpen = { st.openSheet = it })
             }
-            items(orderedExercises, key = { it.id }) { wex ->
+            // Render order: the current exercise, then what is still to come,
+            // then closed slots (done or skipped) — the web's order. A skipped
+            // slot used to keep its place among the open ones, so the list
+            // read current, skipped, next. Only the render moves; the
+            // orderExercises buckets (and the hero choice) are unchanged.
+            val listed = if (sessionOver) orderedExercises else {
+                val (closedRows, openRows) = orderedExercises
+                    .filter { it.id != heroWex?.id }
+                    .partition { isSlotClosed(it, plan.status) }
+                listOfNotNull(heroWex) + openRows + closedRows
+            }
+            items(listed, key = { it.id }) { wex ->
                 ExerciseSlot(
                     st = st,
                     plan = plan,
@@ -1018,7 +1029,7 @@ internal fun StrengthTodayContent(
                         Modifier.fillMaxWidth()
                             .clip(NeonCardShape)
                             .background(pal.card)
-                            .border(1.dp, pal.outlineV, NeonCardShape)
+                            .then(if (pal.neon) Modifier else Modifier.border(1.dp, pal.outlineV, NeonCardShape))
                             .padding(16.dp),
                     ) {
                         Text("AI review", color = pal.ink, fontSize = 15.sp,
@@ -1219,8 +1230,8 @@ private fun OfflineBanner(
         (if (pal.neon) NeonMV.Amber else Color(0xFFEAB308))
         else (if (pal.neon) NeonMV.Magenta else Color(0xFFA78BFA))
     val msg = when {
-        !online && pending > 0 -> "Offline · $pending set${if (pending == 1) "" else "s"} buffered"
-        !online -> "Offline · using cached workout"
+        !online && pending > 0 -> "Offline, $pending set${if (pending == 1) "" else "s"} saved on the phone"
+        !online -> "Offline, showing the saved workout"
         pending > 0 -> "$pending set${if (pending == 1) "" else "s"} pending sync"
         else -> ""
     }
@@ -2122,7 +2133,7 @@ private fun ContextChip(text: String) {
         Modifier
             .clip(RoundedCornerShape(50))
             .background(pal.cardLow)
-            .border(1.dp, pal.outlineV, RoundedCornerShape(50))
+            .then(if (pal.neon) Modifier else Modifier.border(1.dp, pal.outlineV, RoundedCornerShape(50)))
             .padding(horizontal = 10.dp, vertical = 4.dp),
     ) { Text(text, color = pal.muted, fontSize = 12.sp) }
 }
@@ -2183,8 +2194,8 @@ internal fun SlotStrip(
         Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(pal.cardLow)
-            .border(1.dp, pal.outlineV, shape),
+            .background(if (pal.neon) NeonMV.Card else pal.cardLow)
+            .then(if (pal.neon) Modifier else Modifier.border(1.dp, pal.outlineV, shape)),
     ) {
         Row(
             modifier = Modifier
@@ -2273,7 +2284,9 @@ internal fun ExerciseCard(
             .fillMaxWidth()
             .clip(NeonCardShape)
             .background(pal.card)
-            .border(if (supersetColor != null) 2.dp else 1.dp, border, NeonCardShape)
+            // Neon: flat. The superset is named in magenta text above; a
+            // coloured outline on top of that said the same thing twice.
+            .then(if (pal.neon) Modifier else Modifier.border(if (supersetColor != null) 2.dp else 1.dp, border, NeonCardShape))
             .padding(16.dp),
     ) {
         if (wex.supersetId != null && partnerName != null) {
@@ -2292,13 +2305,13 @@ internal fun ExerciseCard(
                 )
                 // TD-10: keep the plan and its improvisations distinguishable.
                 if (wex.addedAdHoc) {
-                    Text("ADDED BY YOU", color = pal.accent, fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+                    Text("Added by you", color = pal.accent, fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold)
                 }
                 // OG2-A6: flagged, never removed.
                 if (wex.equipmentMissing) {
-                    Text("NEEDS KIT YOU NO LONGER HAVE", color = pal.caution, fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+                    Text("Needs kit you no longer have", color = pal.caution, fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold)
                 }
                 Text(prescriptionLine(wex, info), color = pal.muted, fontSize = 13.sp)
                 // PROG-1: program-mode scheme badge on program lifts
@@ -2361,23 +2374,23 @@ internal fun ExerciseCard(
     }
 }
 
-/** "4×10 per side @ 25 lb  ·  105s rest" — the slot's prescription, shared
+/** "4×10 per side at 25 lb, 105s rest" — the slot's prescription, shared
  *  by the exercise card and the NOW hero so the two cannot word it apart. */
 internal fun prescriptionLine(wex: StrengthWorkoutExerciseRow, info: StrengthExerciseInfo?): String {
     val rep = if (wex.targetRepsLow == wex.targetRepsHigh)
         "${wex.targetRepsLow}" else "${wex.targetRepsLow}-${wex.targetRepsHigh}"
-    val w = wex.targetWeightLb?.let { " @ ${fmtLbPlain(it)} lb" } ?: ""
+    val w = wex.targetWeightLb?.let { " at ${fmtLbPlain(it)} lb" } ?: ""
     // OG3-B3: the per-side words are the server's.
     val side = wex.plannedSets.firstOrNull { it.perSide }
         ?.sideLabel?.let { " $it" } ?: ""
     val unit = if (isTimedExercise(wex, info)) "s" else ""
-    return "${wex.targetSets}×$rep$unit$side$w  ·  ${wex.targetRestS}s rest"
+    return "${wex.targetSets}×$rep$unit$side$w, ${wex.targetRestS}s rest"
 }
 
 /** LOG-1 "Last (Aug 25 · Easy): 25×9 · 25×9" — rep-based slots only. */
 internal fun lastSetsLine(wex: StrengthWorkoutExerciseRow, info: StrengthExerciseInfo?): String? {
     if (isTimedExercise(wex, info) || wex.lastSets.isEmpty()) return null
-    val summary = wex.lastSets.joinToString(" · ") { ls ->
+    val summary = wex.lastSets.joinToString(", ") { ls ->
         val wv = ls.weightLb?.let { fmtLbPlain(it) }
         if (wv != null) "$wv×${ls.reps}" else "${ls.reps}"
     }
@@ -3144,21 +3157,26 @@ private fun WeekStrip(
                 modifier = Modifier
                     .weight(1f)
                     .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-                    .border(
+                    .then(if (pal.neon) Modifier else Modifier.border(
                         1.dp,
                         if (isToday) pal.accent else pal.outlineV,
                         androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
-                    )
-                    .background(pal.cardLow)
+                    ))
+                    .background(if (pal.neon) Color.Transparent else pal.cardLow)
                     .clickable(enabled = !isToday) { onDayClick(iso) }
-                    .padding(vertical = 6.dp),
+                    .padding(vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
+                // Neon: today is marked by a cyan label and underline, not a
+                // bordered box — seven outlined cells were seven more cards.
                 Text(
-                    if (isToday) "Today" else d.dayOfWeek.name.take(3),
-                    color = if (isToday) pal.ink else pal.muted,
-                    fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp,
+                    if (isToday) "Today"
+                    else if (pal.neon) d.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }
+                    else d.dayOfWeek.name.take(3),
+                    color = if (isToday) (if (pal.neon) NeonMV.Cyan else pal.ink) else pal.muted,
+                    fontSize = if (pal.neon) 12.sp else 10.sp, fontWeight = FontWeight.SemiBold,
+                    letterSpacing = if (pal.neon) 0.sp else 0.6.sp,
                 )
                 Box(
                     modifier = Modifier
@@ -3171,6 +3189,11 @@ private fun WeekStrip(
                             ) else Modifier
                         ),
                 )
+                if (isToday && pal.neon) {
+                    Box(Modifier.size(width = 18.dp, height = 2.dp)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(1.dp))
+                        .background(NeonMV.Cyan))
+                }
             }
         }
     }

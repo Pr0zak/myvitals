@@ -48,7 +48,7 @@ import androidx.compose.ui.unit.sp
  *   qualifier     "Today", "Today • 9,038 to go", or the reading's date
  *   chart         7 days, full width, weekday letters with today chipped,
  *                 shaded "your normal" band, dotted goal line
- *   chip          filled "In range" / "Goal not met" / "No data"
+ *   chip          "In range" / "No data" as text; a filled amber pill only for "watch"
  *
  * Missing data renders LARGE in the value slot rather than as a dash, so
  * absence reads as a state instead of a failed render.
@@ -93,10 +93,13 @@ fun MetricCard(
         modifier
             .fillMaxWidth()
             .fillMaxHeight()
-            .background(NeonMV.Card, RoundedCornerShape(20.dp))
-            .border(1.dp, accent.copy(alpha = 0.16f), RoundedCornerShape(20.dp))
+            // Flat surface, no domain-tinted hairline: the chart line already
+            // says which domain a card is, and tinted borders competed with
+            // the one amber chip that actually needs attention.
+            .clip(RoundedCornerShape(20.dp))
+            .background(NeonMV.Card)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 12.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 14.dp),
     ) {
         Text(
             name, color = NeonMV.Muted, fontSize = 12.sp,
@@ -107,28 +110,24 @@ fun MetricCard(
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 value ?: "No data",
-                style = androidx.compose.ui.text.TextStyle(
-                    fontFeatureSettings = "tnum",
-                    shadow = androidx.compose.ui.graphics.Shadow(
-                        color = accent.copy(alpha = 0.28f), blurRadius = 18f,
-                    ),
-                ),
+                style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
+                fontFamily = if (hasData) app.myvitals.ui.neon.NeonNumberFamily else null,
                 color = NeonMV.Ink,
                 // M3 Expressive's emphasized scale. This was 30sp Light — a
                 // deliberate early choice so a grid of cards wouldn't read as a
                 // spreadsheet. Google went the other way, and on a card whose
                 // entire job is one number, weight IS the hierarchy. Tight
                 // tracking keeps a four-character value on one line at 2-up.
-                fontWeight = if (hasData) FontWeight.Bold else FontWeight.Light,
-                letterSpacing = if (hasData) (-1.6).sp else 0.sp,
+                fontWeight = if (hasData) FontWeight.Medium else FontWeight.Light,
+                letterSpacing = if (hasData) (-1).sp else 0.sp,
                 // Step down for long values. A compound reading like
                 // "121/78" at 40sp filled the 2-up card, and the unit beside
                 // it was squeezed into one letter per line ("m/m/H/g").
                 fontSize = when {
                     !hasData -> 23.sp
-                    (value?.length ?: 0) <= 5 -> 40.sp
-                    (value?.length ?: 0) == 6 -> 32.sp
-                    else -> 28.sp
+                    (value?.length ?: 0) <= 5 -> 36.sp
+                    (value?.length ?: 0) == 6 -> 30.sp
+                    else -> 26.sp
                 },
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false),
@@ -160,19 +159,14 @@ fun MetricCard(
                 null -> NeonMV.Muted
             }
             Spacer(Modifier.height(5.dp))
-            Box(
-                Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(tone.copy(alpha = 0.12f))
-                    .padding(horizontal = 8.dp, vertical = 3.dp),
-            ) {
-                Text(
-                    "${if (delta > 0) "▲" else "▼"} " +
-                        "%.1f vs baseline".format(kotlin.math.abs(delta)),
-                    color = tone, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
-            }
+            // Plain coloured text, not a pill: the arrow and colour already
+            // carry the judgement.
+            Text(
+                "${if (delta > 0) "▲" else "▼"} " +
+                    "%.1f vs baseline".format(kotlin.math.abs(delta)),
+                color = tone, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
         }
 
 
@@ -210,13 +204,17 @@ fun MetricCard(
             // Pushed to the bottom so chips line up across a row and a
             // missing chart becomes balanced padding, not a short card.
             Spacer(Modifier.weight(1f, fill = false).height(10.dp))
+            // Only "watch" is a filled pill; the rest are plain text, so the
+            // one card that needs attention is the one that stands out.
+            val pill = chip.bg != Color.Transparent
             Box(
-                Modifier
+                if (pill) Modifier
                     .background(chip.bg, RoundedCornerShape(999.dp))
-                    .padding(horizontal = 9.dp, vertical = 3.dp),
+                    .padding(horizontal = 9.dp, vertical = 3.dp)
+                else Modifier,
             ) {
-                Text(chip.text, color = chip.fg, fontSize = 10.sp,
-                    fontWeight = FontWeight.Medium)
+                Text(chip.text, color = chip.fg, fontSize = 12.sp,
+                    fontWeight = if (pill) FontWeight.Medium else FontWeight.Normal)
             }
         }
     }
@@ -230,13 +228,13 @@ private data class Chip(val fg: Color, val bg: Color, val text: String)
  *  nothing, matching the reference. */
 private fun chipFor(hasData: Boolean, status: String?, label: String?): Chip? {
     if (!hasData) {
-        return Chip(NeonMV.Muted, NeonMV.Muted.copy(alpha = 0.12f), "No data")
+        return Chip(NeonMV.Muted, Color.Transparent, "No data")
     }
     return when (status) {
         // Semantic — a verdict, not a domain — but on the shell's own ramp so
         // the chips stop reading as another app's, sitting on a neon card.
-        "good" -> Chip(NeonMV.Lime, NeonMV.Lime.copy(alpha = 0.13f), label ?: "In range")
-        "typical" -> Chip(NeonMV.Muted, NeonMV.Muted.copy(alpha = 0.12f), label ?: "In range")
+        "good" -> Chip(NeonMV.Lime, Color.Transparent, label ?: "In range")
+        "typical" -> Chip(NeonMV.Muted, Color.Transparent, label ?: "In range")
         "watch" -> Chip(NeonMV.Amber, NeonMV.Amber.copy(alpha = 0.14f), label ?: "Out of range")
         else -> null
     }

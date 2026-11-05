@@ -149,7 +149,7 @@ fun StrengthEquipmentScreen(
             else -> {
                 val eq = equipment!!
 
-                EqSection("Dumbbells", muted)
+                EqSection("Dumbbells", muted, neon)
                 EqSegmented(
                     options = listOf("none", "fixed_pairs", "adjustable"),
                     selected = eq.dumbbells.type,
@@ -191,7 +191,7 @@ fun StrengthEquipmentScreen(
                 // The user can pick adjustable here; web still owns the numeric
                 // limits until we add Compose number-pickers in a follow-up.
 
-                EqSection("Wrist weights (lb)", muted)
+                EqSection("Wrist weights (lb)", muted, neon)
                 Text(
                     "Sub-5 lb micro-loaders you strap on to bridge the gap " +
                         "between pairs (e.g. 1.25 lb). The planner uses exactly " +
@@ -199,7 +199,9 @@ fun StrengthEquipmentScreen(
                     color = muted, fontSize = 11.sp,
                     modifier = Modifier.padding(bottom = 4.dp),
                 )
-                val wristAccent = if (neon) NeonMV.Lime else MV.BrandRed
+                // Neon: owning a loader is a selection like any other, so it
+                // takes the one selection colour (cyan), not lime.
+                val wristAccent = if (neon) NeonMV.Cyan else MV.BrandRed
                 val wristPresets = listOf(
                     0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0,
                 )
@@ -258,7 +260,8 @@ fun StrengthEquipmentScreen(
                     ) { Text("Add") }
                 }
 
-                EqSection("Bench", muted)
+                EqSection("Bench", muted, neon)
+                EqGroup(neon) {
                 SwitchRow("Flat", eq.bench.flat, neon) { on ->
                     mutate { it.copy(bench = it.bench.copy(flat = on)) }
                 }
@@ -268,15 +271,20 @@ fun StrengthEquipmentScreen(
                 SwitchRow("Decline", eq.bench.decline, neon) { on ->
                     mutate { it.copy(bench = it.bench.copy(decline = on)) }
                 }
+                }
 
-                EqSection("Bars", muted)
+                EqSection("Bars", muted, neon)
+                EqGroup(neon) {
                 SwitchRow("Pull-up bar", eq.pullUpBar, neon) { on ->
                     mutate { it.copy(pullUpBar = on) }
                 }
+                }
 
-                EqSection("Assistance", muted)
+                EqSection("Assistance", muted, neon)
+                EqGroup(neon) {
                 SwitchRow("Training partner / spotter", eq.trainingPartner, neon) { on ->
                     mutate { it.copy(trainingPartner = on) }
+                }
                 }
                 Text(
                     "Off by default. When off, exercises that need a second " +
@@ -286,7 +294,8 @@ fun StrengthEquipmentScreen(
                     modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
                 )
 
-                EqSection("Cardio gear", muted)
+                EqSection("Cardio gear", muted, neon)
+                EqGroup(neon) {
                 SwitchRow("Rower (Concept2)", eq.cardioRower, neon) { on ->
                     mutate { it.copy(cardioRower = on) }
                 }
@@ -302,6 +311,7 @@ fun StrengthEquipmentScreen(
                 SwitchRow("Treadmill", eq.cardioTreadmill, neon) { on ->
                     mutate { it.copy(cardioTreadmill = on) }
                 }
+                }
 
                 Spacer(Modifier.height(20.dp))
                 Button(
@@ -310,8 +320,12 @@ fun StrengthEquipmentScreen(
                     colors = ButtonDefaults.buttonColors(
                         containerColor = accent, contentColor = onAccent,
                     ),
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text(if (saving) "Saving…" else "Save equipment") }
+                    shape = if (neon) RoundedCornerShape(999.dp) else ButtonDefaults.shape,
+                    modifier = Modifier.fillMaxWidth().then(
+                        if (neon) Modifier.height(50.dp) else Modifier,
+                    ),
+                ) { Text(if (saving) "Saving…" else "Save equipment",
+                    fontWeight = if (neon) FontWeight.SemiBold else null) }
                 status?.let { Text(it, color = good, fontSize = 12.sp,
                     modifier = Modifier.padding(top = 6.dp)) }
                 error?.let { Text(it, color = bad, fontSize = 12.sp,
@@ -333,13 +347,43 @@ private fun fmtLb(lb: Double): String =
     if (lb == lb.toLong().toDouble()) "${lb.toLong()}" else lb.toString()
 
 @Composable
-private fun EqSection(title: String, labelColor: androidx.compose.ui.graphics.Color) {
-    Text(
-        title.uppercase(),
-        color = labelColor, fontSize = 11.sp,
-        fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp,
-        modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
-    )
+private fun EqSection(
+    title: String,
+    labelColor: androidx.compose.ui.graphics.Color,
+    neon: Boolean = false,
+) {
+    if (neon) {
+        // Sentence case, ink, no tracked micro-label.
+        Text(
+            title,
+            color = NeonMV.Ink, fontSize = 17.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(top = 22.dp, bottom = 8.dp),
+        )
+    } else {
+        Text(
+            title.uppercase(),
+            color = labelColor, fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp,
+            modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
+        )
+    }
+}
+
+/** A run of switch rows. Neon: one flat card holds the group; classic:
+ *  the rows sit on the page exactly as before. */
+@Composable
+private fun EqGroup(neon: Boolean, content: @Composable () -> Unit) {
+    if (neon) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(NeonMV.Card)
+                .padding(horizontal = 14.dp, vertical = 4.dp),
+        ) { content() }
+    } else {
+        Column { content() }
+    }
 }
 
 @Composable
@@ -366,18 +410,23 @@ private fun EqSegmented(
                 modifier = Modifier
                     .weight(1f)
                     .height(40.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (on) accent else unselectedBg)
+                    .clip(RoundedCornerShape(if (neon) 12.dp else 8.dp))
+                    // Neon: flat, selection = cyan text on a low-alpha fill.
+                    .background(
+                        if (on) (if (neon) accent.copy(alpha = 0.14f) else accent)
+                        else unselectedBg,
+                    )
                     .border(
-                        1.dp,
-                        if (on) accent else outline,
+                        if (neon) 0.dp else 1.dp,
+                        if (neon) androidx.compose.ui.graphics.Color.Transparent
+                        else if (on) accent else outline,
                         RoundedCornerShape(8.dp),
                     )
                     .clickable { onSelect(opt) },
                 contentAlignment = Alignment.Center,
             ) {
                 Text(label,
-                    color = if (on) selectedInk else unselectedInk,
+                    color = if (on) (if (neon) accent else selectedInk) else unselectedInk,
                     fontSize = 12.sp,
                     fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
                 )
@@ -396,8 +445,10 @@ private fun SwitchRow(
     val ink = if (neon) NeonMV.Ink else MV.OnSurface
     val accent = if (neon) NeonMV.Cyan else MV.BrandRed
     val muted = if (neon) NeonMV.Muted else MV.OnSurfaceVariant
-    val track = if (neon) NeonMV.Card else MV.SurfaceContainerLow
-    val outline = if (neon) NeonMV.Line else MV.OutlineVariant
+    // Neon rows sit inside a Card-coloured group, so the off track is one
+    // step lighter and has no outline.
+    val track = if (neon) NeonMV.CardHigh else MV.SurfaceContainerLow
+    val outline = if (neon) androidx.compose.ui.graphics.Color.Transparent else MV.OutlineVariant
     // thumb on the checked (accent) track stays light in classic; under neon
     // a dark thumb reads on the bright Cyan fill
     val checkedThumb = if (neon) NeonMV.OnAccent else MV.OnSurface
@@ -454,18 +505,23 @@ private fun <T> ChipGrid(
                         modifier = Modifier
                             .weight(1f)
                             .height(36.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (on) accentColor else unselectedBg)
+                            .clip(RoundedCornerShape(if (neon) 10.dp else 8.dp))
+                            .background(
+                                if (on) (if (neon) accentColor.copy(alpha = 0.14f) else accentColor)
+                                else unselectedBg,
+                            )
                             .border(
-                                1.dp,
-                                if (on) accentColor else outline,
+                                if (neon) 0.dp else 1.dp,
+                                if (neon) androidx.compose.ui.graphics.Color.Transparent
+                                else if (on) accentColor else outline,
                                 RoundedCornerShape(8.dp),
                             )
                             .clickable { onToggle(item) },
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(label(item),
-                            color = if (on) selectedInk else unselectedInk,
+                            color = if (on) (if (neon) accentColor else selectedInk) else unselectedInk,
+                            fontFamily = if (neon) app.myvitals.ui.neon.NeonNumberFamily else null,
                             fontSize = 12.sp,
                             fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
                         )

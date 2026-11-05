@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
@@ -51,10 +52,10 @@ fun FocusAreas(
 ) {
     Column(modifier.fillMaxWidth()) {
         Text(
-            "Focus areas", color = Color(0xFFE9EDF2),
-            fontSize = 21.sp,
+            "Focus areas", color = NeonMV.Ink,
+            fontSize = 17.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
         AREAS.chunked(2).forEach { pair ->
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 10.dp),
@@ -100,7 +101,8 @@ private fun AreaTile(a: Area, sub: String, onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .background(Color(0xFF1B1C1F), RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(20.dp))
+            .background(NeonMV.Card)
             .clickable(onClick = onClick)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -109,9 +111,9 @@ private fun AreaTile(a: Area, sub: String, onClick: () -> Unit) {
             modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(10.dp))
         Column {
-            Text(a.label, color = Color(0xFFE9EDF2), fontSize = 14.sp,
+            Text(a.label, color = NeonMV.Ink, fontSize = 14.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(sub, color = Color(0xFF8D949D), fontSize = 11.sp,
+            Text(sub, color = NeonMV.Muted, fontSize = 11.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }

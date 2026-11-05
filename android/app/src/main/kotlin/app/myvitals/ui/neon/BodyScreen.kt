@@ -219,121 +219,191 @@ private fun RecoveryHero(r: VitalTilesResponse, nowMs: Long, onOpen: (String) ->
     val byKey = r.tiles.associateBy { it.key }
     val rec = byKey["recovery"]
     val recValue = (rec?.value as? Number)?.toDouble()
-    NeonHeroCard(accent = NeonMV.Cyan) {
+    // Hero on the page ground, in the Today brief's language: the ring on
+    // the left, a coloured-bar legend carrying the numbers on the right,
+    // then one quiet status line. No card, border or glow.
+    Column(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 22.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.clickable { onOpen("vitals/RECOVERY") },
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(88.dp))
+                    .clickable { onOpen("vitals/RECOVERY") },
             ) {
                 NeonRing(
                     // Recovery is a 0-100 composite; the ring draws it on its
                     // own scale. Null draws an empty ring and says so.
                     fraction = ((recValue ?: 0.0) / 100.0).toFloat(),
                     color = NeonMV.Cyan,
-                    size = 108.dp,
-                    stroke = 9.dp,
+                    size = 176.dp,
+                    stroke = 13.dp,
                 ) {
-                    NeonNumber(
-                        recValue?.let { rec?.displayValue() } ?: "—",
-                        color = if (recValue != null) NeonMV.Ink else NeonMV.Muted,
-                        size = 28,
-                    )
-                    NeonRingCaption("Recovery")
-                }
-                Spacer(Modifier.height(8.dp))
-                val chipText = rec?.statusReason?.replaceFirstChar { it.uppercase() }
-                    ?: if (recValue == null) "No reading yet" else null
-                chipText?.let {
-                    val tone = when (rec?.status) {
-                        "good" -> NeonMV.Lime
-                        "watch" -> NeonMV.Amber
-                        else -> NeonMV.Muted
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            recValue?.let { rec?.displayValue() } ?: "—",
+                            color = if (recValue != null) NeonMV.Ink else NeonMV.Muted,
+                            fontSize = 38.sp, fontFamily = NeonNumberFamily,
+                            fontWeight = FontWeight.Medium, letterSpacing = (-1).sp,
+                        )
+                        Text("Recovery", color = NeonMV.Muted, fontSize = 11.sp)
                     }
-                    Text(
-                        it, color = tone, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(tone.copy(alpha = 0.13f))
-                            .padding(horizontal = 9.dp, vertical = 3.dp),
-                    )
-                }
-                staleNote(rec)?.let {
-                    Text(it, color = NeonMV.Muted, fontSize = 10.sp,
-                        modifier = Modifier.padding(top = 3.dp))
                 }
             }
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Spacer(Modifier.width(18.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 DriverRow(byKey["hrv"], NeonMV.Cyan, onOpen)
                 DriverRow(byKey["resting_hr"], NeonMV.Cyan, onOpen)
                 DriverRow(byKey["sleep_duration"], NeonMV.Magenta, onOpen)
             }
         }
-        val footer = listOfNotNull(
-            r.summary?.takeIf { it.judged > 0 }?.let { "${it.inRange} of ${it.judged} vitals in range" },
-            r.lastSync?.let { syncAge(it, nowMs) }?.let { "synced $it" },
+        val roll = r.summary?.takeIf { it.judged > 0 }
+        val chipText = rec?.statusReason?.replaceFirstChar { it.uppercase() }
+            ?: if (recValue == null) "No reading yet" else null
+        val recNote = listOfNotNull(chipText, staleNote(rec)).joinToString(", ").ifBlank { null }
+        BriefStatusLine(
+            text = roll?.let { "${it.inRange} of ${it.judged} vitals in your range" } ?: recNote,
+            warn = roll?.let { it.inRange < it.judged } ?: (rec?.status == "watch"),
+            showDot = roll != null,
+            trailing = r.lastSync?.let { syncAge(it, nowMs) }?.let { "Synced $it" },
         )
-        if (footer.isNotEmpty()) {
-            Spacer(Modifier.height(12.dp))
-            Box(Modifier.fillMaxWidth().height(1.dp).background(NeonMV.Line))
-            Spacer(Modifier.height(10.dp))
-            Text(footer.joinToString(" · "), color = NeonMV.Muted, fontSize = 12.sp)
+        // The recovery wording gets its own line when the roll-up took the
+        // status line; amber only when the server says "watch".
+        if (roll != null && recNote != null) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                recNote,
+                color = if (rec?.status == "watch") NeonMV.Amber else NeonMV.Muted,
+                fontSize = 12.sp,
+            )
         }
     }
 }
 
-/** One driver beside the ring: label, value + unit, and the server's delta
- *  against baseline (rendered verbatim — the client never subtracts). */
+/** One legend row beside the ring: label, value + unit, and the server's
+ *  delta against baseline as the sub line (verbatim — the client never
+ *  subtracts). */
 @Composable
 private fun DriverRow(t: VitalTile?, accent: Color, onOpen: (String) -> Unit) {
     if (t == null) return
     val hasData = t.value != null
-    Column(Modifier.fillMaxWidth().clickable {
+    val d = t.delta
+    var subColor = NeonMV.Muted
+    val sub: String? = if (hasData && d != null && abs(d) >= 0.05) {
+        val better = when (t.higherIsBetter) {
+            true -> d > 0
+            false -> d < 0
+            null -> null
+        }
+        subColor = when (better) {
+            true -> NeonMV.Lime
+            false -> NeonMV.Amber
+            null -> NeonMV.Muted
+        }
+        "${if (d > 0) "▲" else "▼"} ${"%.1f".format(abs(d))} vs your normal"
+    } else if (hasData && t.target != null && t.key == "sleep_duration") {
+        // Sleep is judged against a target, not a baseline, so it carries
+        // no delta. Name the target rather than invent one.
+        "of ${trimNum(t.target)}h"
+    } else null
+    BriefLegendRow(
+        color = accent,
+        label = t.label,
+        value = if (hasData) t.displayValue() else "—",
+        unit = t.unit.takeIf { hasData && it.isNotBlank() },
+        sub = sub,
+        subColor = subColor,
+    ) {
         when (t.key) {
             "hrv" -> onOpen("vitals/HRV")
             "resting_hr" -> onOpen("vitals/HR")
             "sleep_duration" -> onOpen("vitals/SLEEP")
         }
-    }) {
-        Text(t.label, color = NeonMV.Muted, fontSize = 11.sp)
-        Row(verticalAlignment = Alignment.Bottom) {
-            NeonNumber(
-                if (hasData) t.displayValue() else "—",
-                color = if (hasData) accent else NeonMV.Muted, size = 19,
+    }
+}
+
+/** Legend row in the Today brief's shape: 3dp bar, muted label, value in
+ *  the number face, muted sub line. Shared by Body and You. */
+@Composable
+internal fun BriefLegendRow(
+    color: Color,
+    label: String,
+    value: String,
+    unit: String? = null,
+    sub: String? = null,
+    subColor: Color = NeonMV.Muted,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Box(
+            Modifier
+                .padding(top = 5.dp)
+                .size(width = 3.dp, height = 30.dp)
+                .background(color, RoundedCornerShape(2.dp)),
+        )
+        Spacer(Modifier.width(10.dp))
+        Column {
+            Text(label, color = NeonMV.Muted, fontSize = 12.sp)
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    value, color = NeonMV.Ink, fontSize = 20.sp,
+                    fontFamily = NeonNumberFamily, fontWeight = FontWeight.Medium,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                unit?.let {
+                    Spacer(Modifier.width(3.dp))
+                    Text(it, color = NeonMV.Muted, fontSize = 11.sp,
+                        modifier = Modifier.padding(bottom = 3.dp))
+                }
+            }
+            sub?.let {
+                Text(it, color = subColor, fontSize = 11.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/** The one quiet line under a hero: optional dot (lime, amber when
+ *  [warn]), the text, and a muted trailing note on the right. */
+@Composable
+internal fun BriefStatusLine(
+    text: String?,
+    warn: Boolean,
+    showDot: Boolean = true,
+    trailing: String? = null,
+) {
+    if (text == null && trailing == null) return
+    Spacer(Modifier.height(14.dp))
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        if (text != null) {
+            if (showDot) {
+                Box(
+                    Modifier.size(6.dp).background(
+                        if (warn) NeonMV.Amber else NeonMV.Lime, RoundedCornerShape(3.dp),
+                    ),
+                )
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(
+                text,
+                color = if (!showDot && warn) NeonMV.Amber else NeonMV.Ink.copy(alpha = 0.85f),
+                fontSize = 13.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                // Only the text takes the slack: two weight(1f) children split
+                // the row in half and truncated "4 of 5 vitals in your range".
+                modifier = Modifier.weight(1f),
             )
-            if (hasData && t.unit.isNotBlank()) {
-                Spacer(Modifier.width(3.dp))
-                Text(t.unit, color = NeonMV.Muted, fontSize = 11.sp,
-                    modifier = Modifier.padding(bottom = 2.dp))
-            }
-            Spacer(Modifier.width(8.dp))
-            val d = t.delta
-            if (hasData && d != null && abs(d) >= 0.05) {
-                val better = when (t.higherIsBetter) {
-                    true -> d > 0
-                    false -> d < 0
-                    null -> null
-                }
-                val tone = when (better) {
-                    true -> NeonMV.Lime
-                    false -> NeonMV.Amber
-                    null -> NeonMV.Muted
-                }
-                Text(
-                    "${if (d > 0) "▲" else "▼"} ${"%.1f".format(abs(d))}",
-                    color = tone, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(bottom = 3.dp),
-                )
-            } else if (hasData && t.target != null && t.key == "sleep_duration") {
-                // Sleep is judged against a target, not a baseline, so it
-                // carries no delta. Name the target rather than invent one.
-                Text(
-                    "of ${trimNum(t.target)}h",
-                    color = NeonMV.Muted, fontSize = 11.sp,
-                    modifier = Modifier.padding(bottom = 3.dp),
-                )
-            }
+        } else {
+            Spacer(Modifier.weight(1f))
+        }
+        trailing?.let {
+            Text(it, color = NeonMV.Muted, fontSize = 12.sp, maxLines = 1,
+                modifier = Modifier.padding(start = 12.dp))
         }
     }
 }
@@ -374,8 +444,7 @@ private fun NothingYetCard() {
         modifier = Modifier
             .fillMaxWidth()
             .clip(NeonCardShape)
-            .background(NeonMV.CardHigh)
-            .border(1.dp, NeonMV.Cyan.copy(alpha = 0.22f), NeonCardShape)
+            .background(NeonMV.Card)
             .padding(horizontal = 20.dp, vertical = 28.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

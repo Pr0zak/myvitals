@@ -41,6 +41,7 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import app.myvitals.ui.common.categoryForSplitFocus
 import app.myvitals.data.SettingsRepository
@@ -124,7 +125,7 @@ fun StrengthHistoryScreen(
             Spacer(Modifier.width(4.dp))
             Text(
                 if (detail != null)
-                    "${fmtDate(detail!!.date)} · ${detail!!.splitFocus.replace('_', ' ')}"
+                    "${fmtDate(detail!!.date)}, ${detail!!.splitFocus.replace('_', ' ')}"
                 else "Workout history",
                 color = ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
             )
@@ -221,13 +222,13 @@ private fun MuscleVolumeCard(settings: SettingsRepository, neon: Boolean) {
     Card(
         colors = CardDefaults.cardColors(containerColor = card),
         shape = if (neon) NeonCardShape else CardDefaults.shape,
-        border = if (neon) BorderStroke(1.dp, NeonMV.Line) else null,
+        border = null, // flat under neon: no hairline, the surface is enough
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(14.dp)) {
             Text(
                 "Weekly muscle volume",
-                color = ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                color = ink, fontSize = 15.sp, fontWeight = FontWeight.Medium,
             )
             Text(
                 "Last $windowDays days vs research-backed MEV / MAV",
@@ -334,15 +335,15 @@ private fun WorkoutCalendar(
             containerColor = card,
         ),
         shape = if (neon) NeonCardShape else androidx.compose.material3.CardDefaults.shape,
-        border = if (neon) BorderStroke(1.dp, NeonMV.Line) else null,
+        border = null, // flat under neon: no hairline, the surface is enough
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "WORKOUT CALENDAR",
-                    color = muted,
-                    fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
+                    "Workout calendar",
+                    color = if (neon) NeonMV.Ink else muted,
+                    fontSize = 15.sp, fontWeight = FontWeight.Medium,
                 )
                 Spacer(Modifier.width(8.dp))
                 // OG2-D-5: the legend and the cells below both read
@@ -385,7 +386,7 @@ private fun LegendDot(color: androidx.compose.ui.graphics.Color, label: String, 
                 .background(color, androidx.compose.foundation.shape.CircleShape),
         )
         Spacer(Modifier.width(3.dp))
-        Text(label, color = muted, fontSize = 9.sp)
+        Text(label, color = muted, fontSize = 11.sp)
     }
 }
 
@@ -528,33 +529,47 @@ private fun HistoryRow(r: StrengthWorkoutSummary, neon: Boolean, onClick: () -> 
             else -> NeonMV.Muted
         }
     } else MV.OnSurfaceVariant
+    // Flat card with a 3dp status bar on the left edge and the status as a
+    // coloured word. The v0.7.312 status-tinted border is gone: on a list of
+    // twenty sessions the green outlines were louder than the dates.
     Card(
         colors = CardDefaults.cardColors(
             containerColor = container,
         ),
-        shape = if (neon) NeonCardShape else CardDefaults.shape,
-        border = if (neon) BorderStroke(1.dp, statusColor.copy(alpha = 0.30f)) else null,
+        shape = if (neon) RoundedCornerShape(20.dp) else CardDefaults.shape,
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    fmtDate(r.date),
-                    color = ink, fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    r.status.replace('_', ' ').uppercase(),
-                    color = statusColor, fontSize = 10.sp,
-                    letterSpacing = 1.sp, fontWeight = FontWeight.Bold,
+        Row(
+            Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (neon) {
+                Box(
+                    Modifier.padding(start = 14.dp, top = 14.dp, bottom = 14.dp)
+                        .width(3.dp).fillMaxHeight()
+                        .background(statusColor, RoundedCornerShape(2.dp)),
                 )
             }
-            Text(
-                r.splitFocus.replace('_', ' ').replaceFirstChar(Char::titlecase),
-                color = muted, fontSize = 13.sp,
-                modifier = Modifier.padding(top = 2.dp),
-            )
+            Column(modifier = Modifier.padding(14.dp).weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        fmtDate(r.date),
+                        color = ink, fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        r.status.replace('_', ' ').replaceFirstChar(Char::titlecase),
+                        color = statusColor, fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+                Text(
+                    r.splitFocus.replace('_', ' ').replaceFirstChar(Char::titlecase),
+                    color = muted, fontSize = 13.sp,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
         }
     }
 }
@@ -573,19 +588,19 @@ private fun DetailList(plan: StrengthWorkoutDetail, catalog: Map<String, Strengt
             Card(
                 colors = CardDefaults.cardColors(containerColor = card),
                 shape = if (neon) NeonCardShape else CardDefaults.shape,
-                border = if (neon) BorderStroke(1.dp, NeonMV.Line) else null,
+                border = null, // flat under neon: no hairline, the surface is enough
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(Modifier.padding(14.dp)) {
                     Text(
                         "${wex.orderIndex + 1}. " +
                                 (catalog[wex.exerciseId]?.name ?: wex.exerciseId.replace('_', ' ')),
-                        color = ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                        color = ink, fontSize = 15.sp, fontWeight = FontWeight.Medium,
                     )
                     for (s in wex.sets.sortedBy { it.setNumber }) {
                         Text(
                             "Set ${s.setNumber}: ${s.actualWeightLb ?: "—"}lb × ${s.actualReps ?: "—"}" +
-                                    (s.rating?.let { " · RPE $it" } ?: ""),
+                                    (s.rating?.let { ", RPE $it" } ?: ""),
                             color = muted, fontSize = 12.sp,
                         )
                     }

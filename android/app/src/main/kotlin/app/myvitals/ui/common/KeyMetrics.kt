@@ -3,6 +3,7 @@ package app.myvitals.ui.common
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Arrangement
@@ -77,7 +78,7 @@ fun KeyMetrics(
             ) {
                 Text(
                     title ?: "", color = NeonMV.Ink,
-                    fontSize = 21.sp, fontWeight = FontWeight.Normal,
+                    fontSize = 17.sp, fontWeight = FontWeight.Medium,
                 )
                 if (onEdit != null) {
                     Text(
@@ -99,9 +100,11 @@ fun KeyMetrics(
             byGroup.keys.filter { it !in groupOrder }
         heads.forEach { head ->
             Text(
-                head, color = NeonMV.Ink, fontSize = 16.sp,
+                // Sub-heading under the section title: muted and smaller, so
+                // the page has two heading levels rather than two equals.
+                head, color = NeonMV.Muted, fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(top = 18.dp, bottom = 10.dp),
+                modifier = Modifier.padding(top = 14.dp, bottom = 8.dp),
             )
             val inGroup = byGroup[head] ?: emptyList()
             val rows = if (tiered) inGroup.filter { it.cadence == "intermittent" } else emptyList()
@@ -172,10 +175,10 @@ private fun IntermittentRow(t: VitalTile, onClick: (() -> Unit)?) {
     Column(
         Modifier
             .fillMaxWidth()
-            .background(NeonMV.Card, androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
-            .border(1.dp, accent.copy(alpha = 0.16f), androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
+            .background(NeonMV.Card)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
         Row(
             Modifier.fillMaxWidth(),
@@ -188,7 +191,7 @@ private fun IntermittentRow(t: VitalTile, onClick: (() -> Unit)?) {
                         if (hasData) t.displayValue() else "No data",
                         color = if (hasData) NeonMV.Ink else NeonMV.Muted,
                         fontFamily = app.myvitals.ui.neon.NeonNumberFamily,
-                        fontWeight = if (hasData) FontWeight.Bold else FontWeight.Medium,
+                        fontWeight = FontWeight.Medium,
                         fontSize = if (hasData) 24.sp else 17.sp,
                         letterSpacing = (-0.5).sp,
                         maxLines = 1,
@@ -208,13 +211,17 @@ private fun IntermittentRow(t: VitalTile, onClick: (() -> Unit)?) {
                     "watch" -> NeonMV.Amber
                     else -> NeonMV.Muted
                 }
+                // Filled pill only for "watch"; otherwise plain text.
+                val pill = t.status == "watch"
                 Text(
-                    label, color = tone, fontSize = 10.sp, fontWeight = FontWeight.Medium,
+                    label, color = tone, fontSize = 12.sp,
+                    fontWeight = if (pill) FontWeight.Medium else FontWeight.Normal,
                     maxLines = 1,
-                    modifier = Modifier
-                        .background(tone.copy(alpha = 0.13f),
+                    modifier = if (pill) Modifier
+                        .background(tone.copy(alpha = 0.14f),
                             androidx.compose.foundation.shape.RoundedCornerShape(999.dp))
-                        .padding(horizontal = 9.dp, vertical = 3.dp),
+                        .padding(horizontal = 9.dp, vertical = 3.dp)
+                    else Modifier,
                 )
             }
         }

@@ -11,7 +11,6 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import NeonPage from "@/components/neon/NeonPage.vue";
-import NeonStat from "@/components/neon/NeonStat.vue";
 import { api } from "@/api/client";
 import { apiBase } from "@/config";
 import { ratingColor, ratingLabel } from "@/strength/rating";
@@ -19,7 +18,6 @@ import type {
   StrengthExercise, StrengthSet, StrengthWorkoutDetail, StrengthWorkoutExercise,
 } from "@/api/types";
 
-const LIME = "#5dff3b";
 
 const route = useRoute();
 
@@ -64,11 +62,11 @@ const pageTitle = computed(() =>
 
 function muscleGroupsFor(focus: string): string {
   const m: Record<string, string> = {
-    push: "Chest · Shoulders · Triceps",
-    pull: "Back · Biceps",
-    legs: "Quads · Hamstrings · Glutes · Calves",
-    upper: "Chest · Back · Shoulders · Arms",
-    lower: "Quads · Hamstrings · Glutes · Calves",
+    push: "Chest, shoulders, triceps",
+    pull: "Back, biceps",
+    legs: "Quads, hamstrings, glutes, calves",
+    upper: "Chest, back, shoulders, arms",
+    lower: "Quads, hamstrings, glutes, calves",
     full_body: "Full body — chest, back, legs",
     rest: "Rest day",
   };
@@ -81,11 +79,8 @@ function fmtDate(iso: string): string {
     return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
   } catch { return iso; }
 }
-const subtitle = computed(() => {
-  const w = workout.value;
-  const d = w ? w.date : String(route.params.date ?? "");
-  return w ? `${fmtDate(d)} · ${muscleGroupsFor(w.split_focus)}` : fmtDate(d);
-});
+const dateLabel = computed(() => fmtDate(workout.value?.date ?? String(route.params.date ?? "")));
+const muscles = computed(() => (workout.value ? muscleGroupsFor(workout.value.split_focus) : ""));
 
 const status = computed<{ label: string; tone: string }>(() => {
   const w = workout.value;
@@ -106,17 +101,27 @@ const tonnageText = computed(() => {
   const s = summary.value;
   if (!s) return "—";
   if (s.total_volume_lb === 0 && s.working_sets > 0) return "BW";
-  return `${Math.round(s.total_volume_lb).toLocaleString()} lb`;
+  return Math.round(s.total_volume_lb).toLocaleString();
 });
-const tonnageLabel = computed(() => (tonnageText.value === "BW" ? "Bodyweight" : "Tonnage"));
 const durationText = computed(() => {
   const s = summary.value?.net_duration_s;
-  return s == null ? "—" : `${Math.round(s / 60)} min`;
+  return s == null ? "—" : String(Math.round(s / 60));
 });
-const countsLine = computed(() => {
+/** The hero legend, outer to inner in the Today-brief style. Every value is
+ *  the server's session_summary or the workout's own counters. */
+const legend = computed(() => {
   const w = workout.value;
-  if (!w || w.sets_total == null || w.exercises_total == null) return "";
-  return `${w.sets_done ?? 0}/${w.sets_total} sets · ${w.exercises_done ?? 0}/${w.exercises_total} exercises`;
+  if (!w) return [];
+  const bw = tonnageText.value === "BW";
+  return [
+    { key: "lift", color: "var(--rn-lime)", label: "Lifted", value: tonnageText.value,
+      sub: bw ? "bodyweight" : summary.value ? "lb" : null },
+    { key: "sets", color: "var(--rn-cyan)", label: "Sets",
+      value: w.sets_total == null ? "—" : `${w.sets_done ?? 0}/${w.sets_total}`,
+      sub: w.exercises_total == null ? null : `${w.exercises_done ?? 0} of ${w.exercises_total} exercises` },
+    { key: "dur", color: "var(--rn-mag)", label: "Duration", value: durationText.value,
+      sub: summary.value?.net_duration_s == null ? null : "min" },
+  ];
 });
 
 const exercises = computed(() =>
@@ -183,10 +188,25 @@ function pillLabel(r: number): string { return r === 1 ? "Fail" : ratingLabel(r)
 
 <template>
   <NeonPage :title="pageTitle" back="/workout/strength/today" class="day-view">
-    <div class="sub-row">
-      <span class="subtitle">{{ subtitle }}</span>
-      <span v-if="workout" class="pill" :class="status.tone">{{ status.label }}</span>
-    </div>
+    <!-- Hero on the page ground: date and status, the muscle groups as the
+         headline, then the session as a legend. No card, no border. -->
+    <section class="hero">
+      <div class="hero-top">
+        <span class="date">{{ dateLabel }}</span>
+        <span v-if="workout" class="word" :class="status.tone">{{ status.label }}</span>
+      </div>
+      <h2 v-if="muscles" class="muscles">{{ muscles }}</h2>
+      <div v-if="workout" class="legend">
+        <div v-for="l in legend" :key="l.key" class="lrow">
+          <span class="bar" :style="{ background: l.color }" />
+          <span class="ltxt">
+            <span class="llab">{{ l.label }}</span>
+            <span class="lval num">{{ l.value }}</span>
+            <span v-if="l.sub" class="lsub">{{ l.sub }}</span>
+          </span>
+        </div>
+      </div>
+    </section>
 
     <p v-if="loading" class="muted">Loading…</p>
     <p v-else-if="error" class="err">{{ error }}</p>
@@ -194,15 +214,6 @@ function pillLabel(r: number): string { return r === 1 ? "Fail" : ratingLabel(r)
     <div v-else-if="notFound" class="card muted-card">No workout recorded for this day.</div>
 
     <template v-else-if="workout">
-      <template v-if="summary">
-        <div class="tiles">
-          <NeonStat :value="tonnageText" :label="tonnageLabel" :accent="LIME" />
-          <NeonStat :value="String(summary.working_sets)" label="Sets" />
-          <NeonStat :value="durationText" label="Duration" />
-        </div>
-        <p v-if="countsLine" class="counts">{{ countsLine }}</p>
-      </template>
-
       <!-- SKIP-1: a declined slot is muted so history doesn't read it as an
            untouched prescription the user might still get to. -->
       <article v-for="wex in exercises" :key="wex.id"
@@ -218,7 +229,7 @@ function pillLabel(r: number): string { return r === 1 ? "Fail" : ratingLabel(r)
             <h3>{{ exName(wex.exercise_id) }}</h3>
             <div class="rx">{{ prescriptionLine(wex) }}</div>
           </div>
-          <span v-if="wex.skipped" class="pill amber">Skipped</span>
+          <span v-if="wex.skipped" class="word amber">Skipped</span>
         </header>
 
         <template v-if="!wex.skipped">
@@ -226,7 +237,7 @@ function pillLabel(r: number): string { return r === 1 ? "Fail" : ratingLabel(r)
           <p v-else-if="!rows(wex).length" class="state">Not logged</p>
           <table v-else class="sets">
             <thead>
-              <tr><th>Set</th><th>Lb</th><th>Reps</th><th class="r"><span class="sr">Rating</span></th></tr>
+              <tr><th>Set</th><th>lb</th><th>Reps</th><th class="r"><span class="sr">Rating</span></th></tr>
             </thead>
             <tbody>
               <tr v-for="s in rows(wex)" :key="s.set_number" :class="{ skip: s.actual_reps == null }">
@@ -253,31 +264,32 @@ function pillLabel(r: number): string { return r === 1 ? "Fail" : ratingLabel(r)
 </template>
 
 <style scoped>
-.sub-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -10px 0 16px; }
-.subtitle { color: var(--rn-mut); font-size: 13px; min-width: 0; }
-.pill {
-  font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
-  padding: 3px 9px; border-radius: 999px; white-space: nowrap;
-  color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--c) 32%, transparent);
-}
-.pill.lime { --c: var(--rn-lime); }
-.pill.cyan { --c: var(--rn-cyan); }
-.pill.amber { --c: var(--rn-amber); }
-.pill.muted { --c: var(--rn-mut); }
+.hero { margin: -6px 0 22px; }
+.hero-top { display: flex; align-items: baseline; gap: 10px; }
+.date { flex: 1; color: var(--rn-mut); font-size: 13px; }
+/* Status is a coloured word, not a bordered pill: the colour is the signal. */
+.word { --c: var(--rn-mut); color: var(--c); font-size: 13px; font-weight: 500; white-space: nowrap; }
+.word.lime { --c: var(--rn-lime); }
+.word.cyan { --c: var(--rn-cyan); }
+.word.amber { --c: var(--rn-amber); }
+.muscles { margin: 2px 0 16px; font-size: 20px; font-weight: 500; color: var(--rn-ink); }
+.legend { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.lrow { display: flex; gap: 9px; min-width: 0; }
+.bar { flex: none; width: 3px; height: 30px; margin-top: 4px; border-radius: 2px; }
+.ltxt { display: flex; flex-direction: column; min-width: 0; }
+.llab { font-size: 12px; color: var(--rn-mut); }
+.lval { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-size: 20px; font-weight: 500;
+  color: var(--rn-ink); line-height: 1.25; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lsub { font-size: 11px; color: var(--rn-mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .muted { color: var(--rn-mut); }
 .err { color: var(--rn-bad); }
 .card {
-  background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 18px;
-  padding: 12px 14px; margin-bottom: 10px; min-width: 0;
+  background: var(--rn-card); border-radius: 20px;
+  padding: 14px; margin-bottom: 10px; min-width: 0;
 }
 .muted-card { color: var(--rn-mut); }
 
-.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.tiles :deep(.ns-v) { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.counts { color: var(--rn-mut); font-size: 13px; text-align: center; margin: 8px 0 14px;
-  font-variant-numeric: tabular-nums; }
 
 .ex-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .thumb { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 10px; overflow: hidden;
@@ -287,7 +299,7 @@ function pillLabel(r: number): string { return r === 1 ? "Fail" : ratingLabel(r)
   -webkit-mask-size: 70%; mask-size: 70%; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
   -webkit-mask-position: center; mask-position: center; }
 .ex-title { flex: 1; min-width: 0; }
-.ex-title h3 { margin: 0; font-size: 15px; font-weight: 700; color: var(--rn-ink); text-transform: capitalize;
+.ex-title h3 { margin: 0; font-size: 15px; font-weight: 500; color: var(--rn-ink); text-transform: capitalize;
   overflow-wrap: anywhere; }
 .rx { color: var(--rn-mut); font-size: 12.5px; margin-top: 2px; font-variant-numeric: tabular-nums;
   font-family: 'Space Grotesk', 'Geist Mono', monospace; overflow-wrap: anywhere; }
@@ -298,7 +310,7 @@ function pillLabel(r: number): string { return r === 1 ? "Fail" : ratingLabel(r)
 
 .sets { width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: fixed;
   font-variant-numeric: tabular-nums; }
-.sets th { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+.sets th { font-size: 11px; font-weight: 400;
   color: var(--rn-mut); text-align: left; padding: 0 0 4px; }
 .sets th:first-child { width: 3rem; }
 .sets th.r, .sets td.r { text-align: right; width: 5.5rem; }
@@ -308,7 +320,6 @@ function pillLabel(r: number): string { return r === 1 ? "Fail" : ratingLabel(r)
 .sets tr.skip td { color: var(--rn-mut); }
 .skip-cell { font-family: inherit; font-style: italic; }
 .rate { display: inline-block; font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
-  font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
-  color: var(--c); background: color-mix(in srgb, var(--c) 15%, transparent); }
+  font-size: 12px; font-weight: 500; color: var(--c); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>

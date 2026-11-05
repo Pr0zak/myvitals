@@ -27,6 +27,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import app.myvitals.ui.neon.NeonMV
+import app.myvitals.ui.neon.NeonNumberFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -76,38 +78,42 @@ private fun DayBreak(label: String) {
         Modifier.fillMaxWidth().padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.weight(1f).height(1.dp).background(Color(0xFF3A3D45)))
-        Text(label, color = Color(0xFFB9BEC6), fontSize = 13.sp,
+        Box(Modifier.weight(1f).height(1.dp).background(Color(0xFF2C3046)))
+        Text(label, color = NeonMV.Muted, fontSize = 13.sp,
             modifier = Modifier.padding(horizontal = 12.dp))
-        Box(Modifier.weight(1f).height(1.dp).background(Color(0xFF3A3D45)))
+        Box(Modifier.weight(1f).height(1.dp).background(Color(0xFF2C3046)))
     }
 }
 
 @Composable
 private fun StatCard(st: app.myvitals.sync.NarrativeStat) {
+    // Filled pill only for "watch"; good/typical are plain text.
     val (fg, bg) = when (st.tone) {
-        "good" -> Color(0xFF7EE2A8) to Color(0x287EE2A8)
-        "watch" -> Color(0xFFE8B661) to Color(0x28E8B661)
-        else -> Color(0xFFC7CBD1) to Color(0x24C7CBD1)
+        "good" -> NeonMV.Lime to Color.Transparent
+        "watch" -> NeonMV.Amber to NeonMV.Amber.copy(alpha = 0.14f)
+        else -> NeonMV.Muted to Color.Transparent
     }
     Column(
         Modifier
             .fillMaxWidth()
-            .background(Color(0xFF232428), RoundedCornerShape(14.dp))
+            .background(NeonMV.CardHigh, RoundedCornerShape(14.dp))
             .padding(12.dp),
     ) {
-        Text(st.label, color = Color(0xFFB9BEC6), fontSize = 12.sp)
+        Text(st.label, color = NeonMV.Muted, fontSize = 12.sp)
         Spacer(Modifier.height(2.dp))
-        Text(st.value, color = Color(0xFFE9EDF2), fontSize = 22.sp,
-            fontWeight = FontWeight.Light, maxLines = 1,
+        Text(st.value, color = NeonMV.Ink, fontSize = 21.sp,
+            fontFamily = NeonNumberFamily,
+            fontWeight = FontWeight.Medium, maxLines = 1,
             overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(8.dp))
+        val pill = bg != Color.Transparent
         Box(
-            Modifier.background(bg, RoundedCornerShape(999.dp))
-                .padding(horizontal = 9.dp, vertical = 3.dp),
+            if (pill) Modifier.background(bg, RoundedCornerShape(999.dp))
+                .padding(horizontal = 9.dp, vertical = 3.dp)
+            else Modifier,
         ) {
-            Text(st.chip, color = fg, fontSize = 11.sp,
-                fontWeight = FontWeight.Medium)
+            Text(st.chip, color = fg, fontSize = if (pill) 11.sp else 12.sp,
+                fontWeight = if (pill) FontWeight.Medium else FontWeight.Normal)
         }
     }
 }
@@ -171,7 +177,7 @@ private fun EventCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .background(Color(0xFF1B1C1F), RoundedCornerShape(20.dp))
+            .background(NeonMV.Card, RoundedCornerShape(20.dp))
             .padding(16.dp),
     ) {
         val isNap = e.kind == "nap"
@@ -184,16 +190,16 @@ private fun EventCard(
                 tint = Color(0xFFB39DDB), modifier = Modifier.size(15.dp),
             )
             Spacer(Modifier.width(7.dp))
-            Text(stamp(e), color = Color(0xFFB9BEC6), fontSize = 12.sp)
+            Text(stamp(e), color = NeonMV.Muted, fontSize = 12.sp)
         }
         Spacer(Modifier.height(8.dp))
 
-        Text(e.headline, color = Color(0xFFE9EDF2), fontSize = 21.sp,
-            fontWeight = FontWeight.Normal)
+        Text(e.headline, color = NeonMV.Ink, fontSize = 17.sp,
+            fontWeight = FontWeight.Medium)
         // Only the nap carries a sentence; a scored night says it in stats.
         if (isNap) {
             Spacer(Modifier.height(4.dp))
-            Text(e.detail, color = Color(0xFFB9BEC6), fontSize = 13.sp)
+            Text(e.detail, color = NeonMV.Muted, fontSize = 13.sp)
         }
 
         if (e.stats.isNotEmpty()) {
@@ -209,7 +215,7 @@ private fun EventCard(
         Column(
             Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF131417), RoundedCornerShape(14.dp))
+                .background(Color(0xFF141722), RoundedCornerShape(14.dp))
                 .padding(12.dp),
         ) {
             val seen = e.stages.map { it.stage }.toSet()
@@ -223,7 +229,7 @@ private fun EventCard(
                 val total = e.stages.firstOrNull { it.stage == stage }?.durationS ?: 0
                 Text(
                     "${LANE_LABEL[stage] ?: stage} · ${fmtMins(total)}",
-                    color = Color(0xFFE9EDF2), fontSize = 12.sp,
+                    color = NeonMV.Ink, fontSize = 12.sp,
                 )
                 Spacer(Modifier.height(4.dp))
                 StageTrack(e, stage, LANE_TONE[stage] ?: Color(0xFF7AA7FF))
@@ -233,9 +239,9 @@ private fun EventCard(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text(clock(e.start), color = Color(0xFF6F767F), fontSize = 11.sp)
-                Text(midClock(e), color = Color(0xFF6F767F), fontSize = 11.sp)
-                Text(clock(e.end), color = Color(0xFF6F767F), fontSize = 11.sp)
+                Text(clock(e.start), color = NeonMV.Muted, fontSize = 11.sp)
+                Text(midClock(e), color = NeonMV.Muted, fontSize = 11.sp)
+                Text(clock(e.end), color = NeonMV.Muted, fontSize = 11.sp)
             }
         }
 
@@ -260,7 +266,7 @@ private fun EventCard(
                 onOpenDetail?.let { open ->
                     Icon(
                         Icons.Outlined.MoreVert, contentDescription = "More",
-                        tint = Color(0xFF8D949D),
+                        tint = NeonMV.Muted,
                         modifier = Modifier
                             .clickable(onClick = open)
                             .padding(6.dp)
@@ -274,11 +280,11 @@ private fun EventCard(
 
 @Composable
 private fun Thumb(up: Boolean, active: Boolean, onClick: () -> Unit) {
-    val tint = if (active) Color(0xFF7EE2A8) else Color(0xFF8D949D)
+    val tint = if (active) NeonMV.Cyan else NeonMV.Muted
     Box(
         Modifier
             .background(
-                if (active) Color(0x247EE2A8) else Color.Transparent,
+                if (active) NeonMV.Cyan.copy(alpha = 0.12f) else Color.Transparent,
                 RoundedCornerShape(999.dp),
             )
             .clickable(onClick = onClick)
@@ -302,7 +308,7 @@ private fun StageTrack(e: NarrativeEvent, stage: String, tone: Color) {
         Modifier
             .fillMaxWidth()
             .height(14.dp)
-            .background(Color(0xFF24262B), RoundedCornerShape(7.dp)),
+            .background(NeonMV.Line, RoundedCornerShape(7.dp)),
     ) {
         val span = if (t0 != null && t1 != null) (t1 - t0).toDouble() else 0.0
         if (span <= 0) return@BoxWithConstraints

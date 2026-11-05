@@ -3,7 +3,7 @@
 </template>
 
 <style scoped>
-/* Small tracked caps section label — phone `NeonEyebrow`. */
-.neon-eyebrow { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-size: 11px; font-weight: 700;
-  letter-spacing: .14em; text-transform: uppercase; color: #9b9bb0; margin: 16px 0 8px; }
+/* Sentence-case section heading — phone `NeonEyebrow`. */
+.neon-eyebrow { font-size: 17px; font-weight: 500; color: #ececf5; margin: 18px 0 10px;
+  letter-spacing: -0.1px; }
 </style>

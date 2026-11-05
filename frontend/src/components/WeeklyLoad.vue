@@ -70,8 +70,11 @@ function letter(iso: string): string {
 </script>
 
 <template>
-  <section v-if="data && !failed" class="wl" :style="{ '--tone': tone }">
-    <p class="lbl">Training load · this week</p>
+  <section v-if="data && !failed" class="wlw" :style="{ '--tone': tone }">
+    <!-- Sentence-case heading above a flat card: colour lives in the bars
+         and the verdict, not in a border around them. -->
+    <h2 class="sect">Training load this week</h2>
+    <div class="wl">
 
     <div class="row">
       <span class="big num">{{ Math.round(data.week_load) }}</span>
@@ -79,7 +82,7 @@ function letter(iso: string): string {
         of {{ Math.round(data.target_low) }}–{{ Math.round(data.target_high!) }}
       </span>
     </div>
-    <p class="verdict">{{ verdict }}</p>
+    <p class="verdict" :class="{ quiet: data.band === 'under' }">{{ verdict }}</p>
 
     <div class="bars">
       <span
@@ -99,26 +102,24 @@ function letter(iso: string): string {
     <div v-if="bandLeft" class="scale">
       <span>under</span><span>your usual range</span><span>over</span>
     </div>
+    </div>
   </section>
 </template>
 
 <style scoped>
-.wl {
-  background: #181b27; border: 1px solid color-mix(in srgb, var(--tone) 22%, transparent);
-  border-radius: 20px; padding: 14px; margin: 12px 0;
-}
-.lbl {
-  font-size: .7rem; letter-spacing: .12em; text-transform: uppercase;
-  color: #9b9bb0; margin: 0 0 8px;
-}
+.wlw { margin: 4px 0 18px; }
+.sect { font-size: 17px; font-weight: 500; color: #ececf5; margin: 0 0 10px; letter-spacing: -0.1px; }
+.wl { background: #181b27; border-radius: 20px; padding: 16px; }
 .row { display: flex; align-items: baseline; gap: 8px; }
 .num { font-variant-numeric: tabular-nums; }
 .big {
-  font-size: 2.4rem; font-weight: 700; letter-spacing: -.045em; color: #ececf5;
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  font-size: 2.15rem; font-weight: 500; letter-spacing: -.03em; color: #ececf5;
   line-height: 1;
 }
 .of { font-size: .85rem; color: #9b9bb0; }
-.verdict { font-size: .8rem; color: var(--tone); margin: 6px 0 0; font-weight: 600; }
+.verdict { font-size: .82rem; color: var(--tone); margin: 6px 0 0; }
+.verdict.quiet { color: #9b9bb0; }
 
 .bars {
   display: flex; align-items: flex-end; gap: 4px; height: 54px; margin: 14px 0 4px;
@@ -139,7 +140,7 @@ function letter(iso: string): string {
 }
 .marker {
   position: absolute; top: -5px; width: 3px; height: 18px; border-radius: 2px;
-  background: #ececf5; box-shadow: 0 0 12px rgba(255, 255, 255, .55);
+  background: #ececf5;
   transform: translateX(-1.5px);
 }
 .scale {

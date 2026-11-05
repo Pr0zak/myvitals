@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import TodayHero from "@/components/TodayHero.vue";
+import TodayBrief from "@/components/TodayBrief.vue";
 import WeeklyLoad from "@/components/WeeklyLoad.vue";
-import HealthStatus from "@/components/HealthStatus.vue";
 import FocusAreas from "@/components/FocusAreas.vue";
 import KeyMetrics from "@/components/KeyMetrics.vue";
 import NarrativeCards from "@/components/NarrativeCards.vue";
@@ -46,7 +45,7 @@ async function load() {
   }
 
   // The rings/pills this used to feed are gone; each remaining component
-  // below (TodayHero, WeeklyLoad, ...) fetches its own data now. This
+  // below (TodayBrief, WeeklyLoad, ...) fetches its own data now. This
   // Promise.all survives purely as the unreachable-backend probe: four
   // independent endpoints failing together is a connection problem, not
   // four coincidences, whereas a single endpoint would paint the whole
@@ -88,9 +87,8 @@ function go(path: string) {
       <span class="date">{{ today }}</span>
     </header>
 
-    <TodayHero />
+    <TodayBrief />
     <WeeklyLoad />
-    <HealthStatus />
 
     <KeyMetrics />
 

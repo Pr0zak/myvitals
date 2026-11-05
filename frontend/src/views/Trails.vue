@@ -25,8 +25,6 @@ import { queryToken } from "@/config";
 import Skeleton from "@/components/Skeleton.vue";
 import TrailMap from "@/components/TrailMap.vue";
 import NeonPage from "@/components/neon/NeonPage.vue";
-import NeonHero from "@/components/neon/NeonHero.vue";
-import NeonEyebrow from "@/components/neon/NeonEyebrow.vue";
 import { useRouter } from "vue-router";
 
 /** Condensed rows: name + age only, tighter padding, no comment or meta.
@@ -113,7 +111,7 @@ async function linkActivities() {
   linkResult.value = "";
   try {
     const r = await api.linkActivitiesToTrails(2.0, false);
-    linkResult.value = `Linked ${r.linked} new · ${r.already_linked_skipped} already · ${r.no_match_within_km} no match · ${r.no_gps} no GPS`;
+    linkResult.value = `Linked ${r.linked} new, ${r.already_linked_skipped} already linked, ${r.no_match_within_km} with no match, ${r.no_gps} without GPS`;
     await load();
   } catch (e) {
     linkResult.value = e instanceof Error ? e.message : String(e);
@@ -129,7 +127,7 @@ async function fetchAllOsm() {
   linkResult.value = "";
   try {
     const r = await api.fetchAllTrailOsmPaths(500, false);
-    linkResult.value = `OSM paths: ${r.fetched} fetched · ${r.skipped} cached · ${r.failed} failed`;
+    linkResult.value = `OSM paths: ${r.fetched} fetched, ${r.skipped} cached, ${r.failed} failed`;
   } catch (e) {
     linkResult.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -516,38 +514,47 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
       </p>
 
       <template v-else>
-        <NeonHero accent="#5dff3b">
-          <div class="hero-head">
-            <NeonEyebrow style="margin: 0">Trail status</NeonEyebrow>
-            <span v-if="syncedAt" class="pill peri">synced {{ fmtAge(syncedAt).replace(' ago', '') }}</span>
-          </div>
+        <!-- Hero on the page ground (the Today brief language): the open
+             count left, one legend row per status right, the status bar
+             full width, then a quiet status line and the map as a flat card. -->
+        <section class="hero">
           <template v-if="counts">
-            <div class="count-row">
-              <span class="count">{{ counts.open }}</span>
-              <span class="of">of {{ total }} open</span>
+            <div class="hrow">
+              <div class="count-col">
+                <span class="count num">{{ counts.open }}</span>
+                <span class="of">of {{ total }} open</span>
+              </div>
+              <div class="hlegend">
+                <div v-for="x in segments" :key="x.label" class="lrow">
+                  <span class="lbar" :style="{ background: x.label === 'unknown' ? '#9b9bb0' : x.color }" />
+                  <span class="llab">{{ x.label[0].toUpperCase() + x.label.slice(1) }}</span>
+                  <span class="lval num">{{ x.n }}</span>
+                </div>
+              </div>
             </div>
             <div v-if="segments.length" class="seg" role="img"
                  :aria-label="segments.map((x) => `${x.n} ${x.label}`).join(', ')">
               <span v-for="x in segments" :key="x.label" :style="{ flex: x.n, background: x.color }" />
             </div>
-            <div class="seg-legend">
-              <span v-for="x in segments" :key="x.label"><i :style="{ background: x.label === 'unknown' ? '#9b9bb0' : x.color }" />{{ x.n }} {{ x.label }}</span>
-            </div>
           </template>
           <!-- An older server without counts: say nothing rather than count here. -->
           <p v-else class="hint">Status counts unavailable.</p>
+          <div v-if="syncedAt" class="status">
+            <span class="sdot" />
+            <span class="stext">From the trail status board</span>
+            <span class="sside">Synced {{ fmtAge(syncedAt) }}</span>
+          </div>
           <button class="mini" type="button" aria-label="Open the trail status map" @click="router.push('/trails/map')">
             <div ref="miniEl" class="mini-map" />
             <span class="pill cyan open-map"><MapIcon :size="13" /> Open map</span>
           </button>
-        </NeonHero>
+        </section>
 
         <template v-if="starred.length">
-          <NeonEyebrow>Your trails</NeonEyebrow>
+          <h2 class="sect">Your trails</h2>
           <div class="carousel">
             <RouterLink v-for="t in starred" :key="t.id" class="tile"
-                        :to="(t.visits_total ?? 0) > 0 ? `/trails/${t.id}/visits` : '/trails'"
-                        :style="{ borderColor: statusColor(t.status) + '4d' }">
+                        :to="(t.visits_total ?? 0) > 0 ? `/trails/${t.id}/visits` : '/trails'">
               <span class="tile-st" :style="{ color: statusColor(t.status) }">
                 <i class="dot" :style="{ background: statusColor(t.status) }" />{{ t.status ?? "unknown" }}
               </span>
@@ -565,25 +572,22 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
           { key: 'closed', label: 'Closed', list: grouped.closed },
           { key: 'other', label: 'Other', list: grouped.other },
         ]" :key="g.key" v-show="g.list.length" :class="{ dense }">
-          <NeonEyebrow>{{ g.label }} · {{ g.list.length }}</NeonEyebrow>
+          <h2 class="sect">{{ g.label }} <span class="sect-n">{{ g.list.length }}</span></h2>
           <article v-for="t in g.list" :key="t.id" class="trail"
-                   :class="{ flip: flipped.has(t.id), [`st-${t.status ?? 'other'}`]: true }"
-                   :style="{ borderColor: statusColor(t.status) + '2e' }">
+                   :class="{ flip: flipped.has(t.id), [`st-${t.status ?? 'other'}`]: true }">
             <div class="trail-main">
-              <i class="dot glow" :style="{ background: statusColor(t.status), color: statusColor(t.status) }" />
+              <i class="dot lead" :style="{ background: statusColor(t.status) }" />
               <div class="trail-body" :class="{ tappable: dense }" @click="dense && toggleMap(t)">
                 <strong>{{ t.name }}</strong>
                 <template v-if="!dense">
                   <p v-if="t.comment" class="comment">{{ t.comment }}</p>
                   <p class="meta">
-                    {{ fmtAge(t.source_ts || t.fetched_at) }}
-                    <template v-if="t.city"> · {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</template>
-                    <span v-else-if="t.latitude == null" class="nopin"> · no pin</span>
+                    {{ fmtAge(t.source_ts || t.fetched_at) }}<template v-if="t.city">, {{ t.city }}{{ t.state ? ', ' + t.state : '' }}</template>
+                    <span v-else-if="t.latitude == null" class="nopin">, no pin</span>
                   </p>
                   <RouterLink v-if="(t.visits_total ?? 0) > 0" class="visit-chip visits" :class="visitAgeClass(t.last_visit_at)"
                               :to="`/trails/${t.id}/visits`" title="Show the activities linked to this trail">
-                    <Bike :size="16" /> {{ t.visits_total }} ride{{ t.visits_total === 1 ? '' : 's' }}
-                    <template v-if="t.last_visit_at"> · {{ fmtAge(t.last_visit_at) }}</template>
+                    <Bike :size="16" /> <span class="nowrap">{{ t.visits_total }} ride{{ t.visits_total === 1 ? '' : 's' }}<template v-if="t.last_visit_at">, last {{ fmtAge(t.last_visit_at) }}</template></span>
                     <ChevronRight :size="16" />
                   </RouterLink>
                 </template>
@@ -653,7 +657,7 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
     <div v-if="editTrail" class="overlay" @click.self="closeEdit">
       <div class="edit-drawer" role="dialog" aria-modal="true">
         <header>
-          <h2>Edit location · {{ editTrail.name }}</h2>
+          <h2>Edit location for {{ editTrail.name }}</h2>
           <button class="close" aria-label="Close" @click="closeEdit">✕</button>
         </header>
         <p class="hint">Search a place name, click the map, or use your GPS. Drag the pin to fine-tune.</p>
@@ -700,44 +704,57 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
 .stale span { color: var(--rn-mut); font-size: 12px; }
 .stale em { color: var(--rn-cyan); font-size: 12px; font-style: normal; font-weight: 600; }
 .skeleton-trails { display: flex; flex-direction: column; gap: 8px; }
-.card { background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 18px; padding: 14px; }
+.card { background: var(--rn-card); border: 0; border-radius: 20px; padding: 14px; }
 
-.hero-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.hero { margin: 4px 0 22px; }
+.hrow { display: flex; align-items: center; gap: 18px; }
+.count-col { flex: none; width: 150px; display: flex; flex-direction: column; }
+.hlegend { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.lrow { display: flex; align-items: center; gap: 10px; }
+.lbar { flex: none; width: 3px; height: 20px; border-radius: 2px; }
+.llab { flex: 1; font-size: .8rem; color: var(--rn-mut); }
+.lval { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-size: 1.25rem; font-weight: 500; color: var(--rn-ink); }
+.status { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.sdot { width: 6px; height: 6px; border-radius: 3px; background: var(--rn-lime); flex: none; }
+.stext { font-size: .82rem; color: rgba(236, 236, 245, .85); }
+.sside { margin-left: auto; font-size: .75rem; color: var(--rn-mut); }
+.sect { font-size: 1.1rem; font-weight: 500; color: var(--rn-ink); margin: 26px 0 10px; letter-spacing: -0.1px; }
+.sect-n { color: var(--rn-mut); font-weight: 400; margin-left: 4px; font-family: 'Space Grotesk', 'Geist Mono', monospace; }
 .pill { font-family: 'Space Grotesk', monospace; font-weight: 700; font-size: 12px; padding: 5px 12px; border-radius: 999px;
   border: 1px solid; display: inline-flex; align-items: center; gap: 4px; }
 .pill.peri { color: var(--rn-peri); background: rgba(111, 123, 255, .12); border-color: rgba(111, 123, 255, .4); }
 .pill.cyan { color: var(--rn-cyan); background: rgba(15, 17, 24, .75); border-color: rgba(40, 230, 255, .45); }
 .count-row { display: flex; align-items: baseline; gap: 10px; }
-.count { font-family: 'Space Grotesk', monospace; font-weight: 700; font-size: 56px; line-height: 1; color: var(--rn-lime);
-  letter-spacing: -1px; text-shadow: 0 0 18px rgba(93, 255, 59, .35); }
-.of { font-size: 18px; font-weight: 600; }
-.seg { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin: 12px 0 8px; }
+.count { font-family: 'Space Grotesk', monospace; font-weight: 500; font-size: 72px; line-height: 1; color: var(--rn-ink);
+  letter-spacing: -2px; font-variant-numeric: tabular-nums; }
+.of { font-size: 15px; color: var(--rn-mut); margin-top: 4px; }
+.seg { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 2px; margin: 18px 0 12px; }
 .seg-legend { display: flex; flex-wrap: wrap; gap: 14px; color: var(--rn-mut); font-size: 12px; font-family: 'Space Grotesk', monospace; }
 .seg-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
-.mini { position: relative; display: block; width: 100%; height: 160px; margin-top: 12px; padding: 0; border: 1px solid var(--rn-line);
-  border-radius: 16px; overflow: hidden; background: var(--rn-bg); cursor: pointer; }
+.mini { position: relative; display: block; width: 100%; height: 160px; margin-top: 16px; padding: 0; border: 0;
+  border-radius: 20px; overflow: hidden; background: var(--rn-bg); cursor: pointer; }
 .mini:focus-visible { outline: 2px solid var(--rn-cyan); outline-offset: 2px; }
 .mini-map { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
 .open-map { position: absolute; right: 8px; bottom: 8px; z-index: 500; }
 
 .carousel { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
-.tile { flex: 0 0 150px; display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 18px; background: var(--rn-card);
-  border: 1px solid; color: inherit; text-decoration: none; }
+.tile { flex: 0 0 150px; display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 20px; background: var(--rn-card);
+  border: 0; color: inherit; text-decoration: none; }
 .tile strong { font-size: 14px; min-height: 2.5em; }
-.tile-st { font-family: 'Space Grotesk', monospace; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+.tile-st { font-size: 12px; font-weight: 600; text-transform: capitalize;
   display: inline-flex; align-items: center; gap: 6px; }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
-.dot.glow { width: 12px; height: 12px; box-shadow: 0 0 9px currentColor; margin-top: 5px; }
+.dot.lead { width: 10px; height: 10px; margin-top: 6px; }
 .visits { font-size: 12px; font-weight: 600; }
 .visits.age-fresh, .visits.age-recent { color: var(--rn-lime); }
 .visits.age-medium, .visits.age-old { color: var(--rn-amber); }
 .visits.age-stale { color: var(--rn-mut); }
 
-.trail { background: var(--rn-card); border: 1px solid; border-radius: 18px; margin-bottom: 8px; overflow: hidden; }
+.trail { background: var(--rn-card); border: 0; border-radius: 20px; margin-bottom: 8px; overflow: hidden; }
 .trail.st-closed { opacity: .9; }
 .trail-main { display: flex; align-items: flex-start; gap: 10px; padding: 10px 6px 10px 14px; }
 .dense .trail-main { padding-top: 4px; padding-bottom: 4px; align-items: center; }
-.dense .dot.glow { margin-top: 0; }
+.dense .dot.lead { margin-top: 0; }
 .trail-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding-top: 2px; }
 .trail-body strong { font-size: 15px; }
 .comment { color: #c4c4d4; font-size: 13px; margin: 0; }
@@ -746,7 +763,7 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
 .meta { color: var(--rn-mut); font-size: 12px; margin: 0; font-family: 'Space Grotesk', monospace; }
 .nopin { color: var(--rn-amber); }
 .visit-chip { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; margin-top: 6px;
-  border-radius: 16px; border: 1px solid currentColor; background: color-mix(in srgb, currentColor 10%, transparent); text-decoration: none; }
+  border-radius: 16px; border: 0; background: color-mix(in srgb, currentColor 10%, transparent); text-decoration: none; }
 .act { width: 44px; height: 44px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%;
   background: none; border: 0; color: var(--rn-mut); cursor: pointer; }
 .act:hover, .act.on { color: var(--rn-cyan); background: #ffffff10; }
@@ -791,4 +808,5 @@ onUnmounted(() => { if (tickHandle) clearInterval(tickHandle); });
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
 .form-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--rn-mut); }
 .actions { display: flex; gap: 8px; margin-top: 16px; }
+.nowrap { white-space: nowrap; }
 </style>

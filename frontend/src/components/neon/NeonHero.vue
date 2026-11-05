@@ -1,5 +1,8 @@
 <script setup lang="ts">
-/** The one focal card a screen leads with — phone `NeonHeroCard`. */
+/** The focal block a screen leads with — phone `NeonHeroCard`.
+ *  It sits on the page ground with no surface, border or glow, matching the
+ *  Today brief: the hero is the one unboxed thing on the screen. `accent`
+ *  is kept for API compatibility and exposed as --acc for slot content. */
 defineProps<{ accent: string }>();
 </script>
 
@@ -9,11 +12,7 @@ defineProps<{ accent: string }>();
 
 <style scoped>
 .neon-hero {
-  background: #1e2230;
-  border: 1px solid color-mix(in srgb, var(--acc) 40%, transparent);
-  border-radius: 22px;
-  padding: 16px;
-  margin-bottom: 14px;
-  box-shadow: 0 0 32px color-mix(in srgb, var(--acc) 14%, transparent);
+  padding: 4px 0 0;
+  margin-bottom: 20px;
 }
 </style>

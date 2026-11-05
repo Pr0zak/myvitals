@@ -53,10 +53,10 @@ fun YtdServerPair(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         metricOf(ytd, "sessions")?.let {
-            YtdCell(it, label = "ACTIVITIES", onClick = onClick, modifier = Modifier.weight(1f))
+            YtdCell(it, label = "Activities", onClick = onClick, modifier = Modifier.weight(1f))
         }
         metricOf(ytd, "distance_m")?.let {
-            YtdCell(it, label = "DISTANCE", onClick = onClick, modifier = Modifier.weight(1f))
+            YtdCell(it, label = "Distance", onClick = onClick, modifier = Modifier.weight(1f))
         }
     }
 }
@@ -72,12 +72,10 @@ private fun YtdCell(
         modifier = modifier
             .clip(RoundedCornerShape(18.dp))
             .background(NeonMV.Card)
-            .border(1.dp, NeonMV.Line, RoundedCornerShape(18.dp))
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
-        Text(label, color = NeonMV.Muted, fontSize = 10.sp,
-            fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp)
+        Text(label, color = NeonMV.Muted, fontSize = 12.sp)
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.Bottom) {
             NeonNumber(fmtMetric(m, m.current), size = 22, color = NeonMV.Ink)

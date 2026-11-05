@@ -34,9 +34,9 @@ import kotlin.math.sin
  * so "one look everywhere" is one implementation rather than ten copies that
  * drift. Mirrors the components in frontend/src/components/neon on the web.
  *
- *   NeonHeroCard   the one focal card a screen leads with
- *   NeonRing       glowing progress ring, optional stage ticks / milestone dots
- *   NeonEyebrow    small tracked caps section label (replaces 21sp captions)
+ *   NeonHeroCard   the one focal block a screen leads with (on the page ground)
+ *   NeonRing       progress ring, optional stage ticks / milestone dots
+ *   NeonEyebrow    sentence-case section heading
  *   NeonStatTile   a number over a label, for stat rows
  *
  * A screen reached from another one (detail screens, Meals, Fasting, Sober)
@@ -46,7 +46,14 @@ import kotlin.math.sin
 
 val NeonHeroShape = RoundedCornerShape(22.dp)
 
-/** The focal card: CardHigh, accent border and a soft accent glow. */
+/**
+ * The focal block a screen leads with. It sits on the page ground — no card
+ * surface, border or glow — matching the Today brief: the hero is the one
+ * thing on the screen that is NOT boxed, which is what makes it read as the
+ * hero. [accent] is kept for API compatibility; colour now lives in the
+ * hero's own data marks (rings, legend bars), not in a frame around it.
+ */
+@Suppress("UNUSED_PARAMETER")
 @Composable
 fun NeonHeroCard(
     accent: Color,
@@ -56,28 +63,34 @@ fun NeonHeroCard(
     Column(
         modifier
             .fillMaxWidth()
-            .padding(bottom = 14.dp)
-            .shadow(18.dp, NeonHeroShape, ambientColor = accent, spotColor = accent)
-            .clip(NeonHeroShape)
-            .background(NeonMV.CardHigh)
-            .border(1.dp, accent.copy(alpha = 0.40f), NeonHeroShape)
-            .padding(16.dp),
+            .padding(top = 4.dp, bottom = 20.dp),
         content = content,
     )
 }
 
-/** Small tracked caps label introducing a section. */
+/**
+ * Section heading, sentence case. Call sites written for the old tracked-caps
+ * style sometimes pass "THIS WEEK'S VOLUME"; an all-caps string is folded to
+ * sentence case here so every caller changes without being touched.
+ */
 @Composable
 fun NeonEyebrow(text: String, modifier: Modifier = Modifier) {
     Text(
-        text.uppercase(),
-        color = NeonMV.Muted,
-        fontFamily = NeonNumberFamily,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = 1.4.sp,
-        modifier = modifier.padding(top = 14.dp, bottom = 8.dp),
+        sentenceCase(text),
+        color = NeonMV.Ink,
+        fontSize = 17.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = modifier.padding(top = 18.dp, bottom = 10.dp),
     )
+}
+
+/** "THIS WEEK'S VOLUME" -> "This week's volume". Mixed-case input is left
+ *  alone (it may hold a proper noun or a unit like "HRV"). */
+fun sentenceCase(text: String): String {
+    val letters = text.filter { it.isLetter() }
+    if (letters.isEmpty() || letters.any { it.isLowerCase() }) return text
+    val lower = text.lowercase()
+    return lower.replaceFirstChar { it.uppercase() }
 }
 
 /** A number over a label. `accent` null keeps the number in Ink. */
@@ -92,7 +105,6 @@ fun NeonStatTile(
         modifier
             .clip(NeonCardShape)
             .background(NeonMV.Card)
-            .border(1.dp, NeonMV.Line, NeonCardShape)
             .padding(vertical = 12.dp, horizontal = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -133,9 +145,10 @@ fun NeonRing(
             drawArc(NeonMV.Track, 0f, 360f, false, tl, arcSize, style = Stroke(sw))
             val f = fraction.coerceIn(0f, 1f)
             if (f > 0f) {
-                // Glow: a wider translucent pass under the arc.
-                drawArc(color.copy(alpha = 0.22f), -90f, 360f * f, false, tl, arcSize,
-                    style = Stroke(sw * 2.1f, cap = StrokeCap.Round))
+                // Soft edge: a slightly wider faint pass under the arc. Kept
+                // narrow so it never bleeds into a neighbouring ring.
+                drawArc(color.copy(alpha = 0.12f), -90f, 360f * f, false, tl, arcSize,
+                    style = Stroke(sw + 4.dp.toPx(), cap = StrokeCap.Round))
                 drawArc(color, -90f, 360f * f, false, tl, arcSize,
                     style = Stroke(sw, cap = StrokeCap.Round))
             }
@@ -169,9 +182,11 @@ fun NeonRing(
     }
 }
 
-/** Tiny caption under a ring value ("OF 16H", "SETS"). */
+/** Small caption under a ring value ("of 16h", "sets"). */
 @Composable
 fun NeonRingCaption(text: String) {
-    Text(text.uppercase(), color = NeonMV.Muted, fontSize = 9.sp,
-        fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+    // A caption continues the number above it ("14.3h of 16h"), so an
+    // all-caps caption folds to lower case rather than sentence case.
+    val shown = if (text.any { it.isLowerCase() }) text else text.lowercase()
+    Text(shown, color = NeonMV.Muted, fontSize = 11.sp)
 }

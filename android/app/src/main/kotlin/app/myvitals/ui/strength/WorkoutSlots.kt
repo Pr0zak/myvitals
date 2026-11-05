@@ -1,7 +1,6 @@
 package app.myvitals.ui.strength
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -165,26 +165,36 @@ private fun DoneSummaryRow(
             .fillMaxWidth()
             .heightIn(min = 56.dp)
             .clip(RowShape)
-            .background(WorkoutDoneSurface)
-            .border(1.dp, NeonMV.Line, RowShape)
+            // "You are here" once the hero has scrolled away: a lighter
+            // surface than the rows around it, and (below) the same cyan bar
+            // the hero's "Exercise N of M" line carries.
+            .background(if (current) NeonMV.CardHigh else WorkoutDoneSurface)
             .clickable(onClick = onToggle)
+            .then(
+                if (current) Modifier.drawBehind {
+                    drawRect(NeonMV.Cyan, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height))
+                } else Modifier,
+            )
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (current) {
-            // The NOW exercise, not a finished one: a Cyan dot, not a tick.
-            Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
-                Box(Modifier.size(10.dp).clip(RoundedCornerShape(5.dp)).background(NeonMV.Cyan))
-            }
-        } else Icon(
+        if (!current) Icon(
             Icons.Outlined.CheckCircle, contentDescription = null,
             tint = if (complete) NeonMV.Lime else NeonMV.Muted,
             modifier = Modifier.size(20.dp),
         )
-        Spacer(Modifier.width(10.dp))
-        Text(label, color = NeonMV.Muted, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+        if (!current) Spacer(Modifier.width(10.dp))
+        Text(label, color = if (current) NeonMV.Ink else NeonMV.Muted, fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        Text(
+        if (current) {
+            // The only cyan text in the list.
+            Text(
+                nextSetOf(wex)?.let { "Now, set $it of ${wex.targetSets}" } ?: "Now",
+                color = NeonMV.Cyan, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
+        } else Text(
             "${accountedSets(wex)}/${wex.targetSets} sets",
             color = NeonMV.Muted, fontSize = 12.sp, fontFamily = NeonNumberFamily,
         )
@@ -209,7 +219,7 @@ private fun UpNextRow(
         append("${wex.targetSets}×")
         append(repsRange(wex.targetRepsLow, wex.targetRepsHigh))
         if (timed) append("s")
-        wex.targetWeightLb?.let { append(" · ${fmtLbPlain(it)} lb") }
+        wex.targetWeightLb?.let { append(" at ${fmtLbPlain(it)} lb") }
     }
     val accounted = accountedSets(wex)
     Row(
@@ -218,7 +228,6 @@ private fun UpNextRow(
             .heightIn(min = 56.dp)
             .clip(RowShape)
             .background(NeonMV.Card)
-            .border(1.dp, NeonMV.Line, RowShape)
             .clickable(onClick = onFocus)
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -229,7 +238,7 @@ private fun UpNextRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(prescription, color = NeonMV.Muted, fontSize = 12.sp)
                 if (wex.supersetId != null) {
-                    Text("  ·  superset ${wex.supersetId}", color = NeonMV.Magenta, fontSize = 12.sp)
+                    Text(", superset ${wex.supersetId}", color = NeonMV.Magenta, fontSize = 12.sp)
                 }
             }
         }
@@ -438,14 +447,13 @@ private fun PickRow(alt: StrengthExerciseInfo, enabled: Boolean, onPick: () -> U
             .padding(vertical = 4.dp)
             .clip(RowShape)
             .background(NeonMV.Card)
-            .border(1.dp, NeonMV.Line, RowShape)
             .clickable(enabled = enabled, onClick = onPick)
             .heightIn(min = 56.dp)
             .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
         Text(alt.name, color = NeonMV.Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         Text(
-            "${alt.movementPattern.replace('_', ' ')} · ${alt.primaryMuscle}",
+            "${alt.movementPattern.replace('_', ' ')}, ${alt.primaryMuscle}",
             color = NeonMV.Muted, fontSize = 12.sp,
         )
     }

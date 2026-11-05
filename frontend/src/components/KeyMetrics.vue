@@ -279,7 +279,7 @@ const shown = computed(() => {
               {{ displayValue(t) ?? "No data" }}<small v-if="t.value != null && t.unit">{{ t.unit }}</small>
             </div>
           </div>
-          <span v-if="chipLabel(t)" class="ir-chip"
+          <span v-if="chipLabel(t)" class="ir-chip" :class="{ pill: t.status === 'watch' }"
                 :style="{ color: CHIP_TONE[t.status ?? ''] ?? '#9b9bb0' }">{{ chipLabel(t) }}</span>
         </div>
         <div class="ir-qual">{{ rowQualifier(t) }}</div>
@@ -304,18 +304,21 @@ const shown = computed(() => {
 }
 .irow {
   display: block; width: 100%; text-align: left; cursor: pointer; color: inherit;
-  background: #181b27; border: 1px solid color-mix(in srgb, var(--acc) 16%, transparent);
-  border-radius: 18px; padding: 12px 14px; margin-top: 10px; font: inherit;
+  background: #181b27; border: 0;
+  border-radius: 20px; padding: 14px 16px; margin-top: 10px; font: inherit;
 }
 .ir-top { display: flex; align-items: center; gap: 10px; }
 .ir-main { flex: 1; min-width: 0; }
 .ir-name { font-size: .75rem; color: #9b9bb0; }
-.ir-val { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 700; font-size: 1.5rem;
+.ir-val { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 500; font-size: 1.5rem;
   letter-spacing: -0.02em; color: #ececf5; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ir-val small { font-family: inherit; font-size: .75rem; font-weight: 400; color: #9b9bb0; margin-left: 4px; }
 .ir-val.nodata { font-size: 1.05rem; font-weight: 500; color: #9b9bb0; }
-.ir-chip { font-size: .66rem; font-weight: 500; padding: 3px 9px; border-radius: 999px;
-  background: color-mix(in srgb, currentColor 13%, transparent); white-space: nowrap; }
+/* Filled pill only for "watch"; good/typical are plain text so the one row
+   that needs attention is the one that stands out. */
+.ir-chip { font-size: .75rem; white-space: nowrap; }
+.ir-chip.pill { font-size: .7rem; font-weight: 500; padding: 3px 9px; border-radius: 999px;
+  background: color-mix(in srgb, currentColor 14%, transparent); }
 .ir-qual { font-size: .7rem; color: #9b9bb0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ir-strip { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
 .ir-strip i { width: 8px; height: 8px; border-radius: 50%; background: #272a3b; display: block; }
@@ -323,13 +326,14 @@ const shown = computed(() => {
 .ir-strip i.today { width: 9px; height: 9px; }
 .ir-strip i.today:not(.on) { box-shadow: inset 0 0 0 1px rgba(155, 155, 176, .6); }
 .group { margin-bottom: 14px; }
+/* Two heading levels: the section title, then muted group sub-heads. */
 .ghead {
-  font-size: 1rem; font-weight: 500; color: #ececf5;
-  margin: 18px 0 10px; letter-spacing: 0;
+  font-size: 13px; font-weight: 500; color: #9b9bb0;
+  margin: 14px 0 8px; letter-spacing: 0;
 }
 .sect {
-  font-size: 1.35rem; font-weight: 400; color: #ececf5;
-  margin: 0 0 12px; letter-spacing: -0.2px;
+  font-size: 17px; font-weight: 500; color: #ececf5;
+  margin: 0 0 4px; letter-spacing: -0.1px;
 }
 /* Exactly two columns, matching the phone and the reference. `auto-fill`
    opened 4-6 columns on a desktop dashboard, so the two surfaces laid the
@@ -353,6 +357,11 @@ const shown = computed(() => {
 .grid > .cell:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .cell {
   padding: 0; border: 0; background: none; cursor: pointer;
-  text-align: left; display: block; min-width: 0;
+  text-align: left; min-width: 0;
+  /* Flex, not block: a percentage height inside a <button> grid item does
+     not resolve reliably, and the card overflowed into the next row. The
+     tinted borders used to hide the overlap; flat cards made it visible. */
+  display: flex; flex-direction: column;
 }
+.cell > :deep(.mc) { height: auto; flex: 1; }
 </style>

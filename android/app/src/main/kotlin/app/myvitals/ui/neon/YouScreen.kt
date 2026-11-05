@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.EditNote
@@ -239,10 +240,11 @@ fun YouContent(
 
         HabitsHero(data, zone, onOpen)
 
-        NeonEyebrow("Goals")
+        SectionHeading("Goals")
         GoalRings(data.goals)
+        Spacer(Modifier.height(26.dp))
 
-        NeonEyebrow("More")
+        SectionHeading("More")
         NavGrid(onOpen)
         Spacer(Modifier.height(24.dp))
     }
@@ -266,7 +268,9 @@ private fun profileLine(profile: ProfileResponse?): String? {
             ?.let { add(it.replace("_", " ")) }
     }
     // Only said on a real answer — an unloaded profile says nothing.
-    return if (parts.isEmpty()) "Add your details in Settings" else parts.joinToString(" · ")
+    // A sentence, not a " · " string: "41 yrs, male, 5'11", moderately active".
+    if (parts.isEmpty()) return "Add your details in Settings"
+    return parts.mapIndexed { i, p -> if (i == 0) p else p.lowercase() }.joinToString(", ")
 }
 
 /** 12sp line tucked up under the title, where the old profile card's one
@@ -274,7 +278,7 @@ private fun profileLine(profile: ProfileResponse?): String? {
 @Composable
 private fun ProfileSubtitle(text: String) {
     Text(
-        text, color = NeonMV.Muted, fontSize = 12.sp,
+        text, color = NeonMV.Ink.copy(alpha = 0.85f), fontSize = 13.sp,
         maxLines = 1, overflow = TextOverflow.Ellipsis,
         modifier = Modifier
             .layout { m, c ->
@@ -282,7 +286,16 @@ private fun ProfileSubtitle(text: String) {
                 val lift = 10.dp.roundToPx()
                 layout(p.width, (p.height - lift).coerceAtLeast(0)) { p.place(0, -lift) }
             }
-            .padding(bottom = 14.dp),
+            .padding(bottom = 18.dp),
+    )
+}
+
+/** Sentence-case section heading — replaces the tracked ALL-CAPS eyebrow. */
+@Composable
+private fun SectionHeading(text: String) {
+    Text(
+        text, color = NeonMV.Ink, fontSize = 18.sp, fontWeight = FontWeight.Medium,
+        modifier = Modifier.padding(bottom = 10.dp),
     )
 }
 
@@ -304,19 +317,38 @@ private val STAGE_LABELS = mapOf(
 
 @Composable
 private fun HabitsHero(data: YouData, zone: ZoneId, onOpen: (String) -> Unit) {
-    NeonHeroCard(accent = NeonMV.Cyan) {
-        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-            FastingHalf(data, zone, Modifier.weight(1f)) { onOpen("fasting") }
-            Box(
-                Modifier
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                    .width(1.dp)
-                    .fillMaxHeight()
-                    .background(NeonMV.Line),
-            )
-            SoberHalf(data, zone, Modifier.weight(1f)) { onOpen("sober") }
-        }
+    // Hero on the page ground, in the Today brief's language: two blocks
+    // side by side, separated by space rather than a card or a divider.
+    Row(
+        Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 26.dp),
+        horizontalArrangement = Arrangement.spacedBy(24.dp),
+    ) {
+        FastingHalf(data, zone, Modifier.weight(1f)) { onOpen("fasting") }
+        SoberHalf(data, zone, Modifier.weight(1f)) { onOpen("sober") }
     }
+}
+
+/** Muted label with the 3dp identity bar — the legend's label, used as the
+ *  heading of each hero block. */
+@Composable
+private fun BlockLabel(text: String, color: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(width = 3.dp, height = 14.dp).background(color, RoundedCornerShape(2.dp)))
+        Spacer(Modifier.width(8.dp))
+        Text(text, color = NeonMV.Muted, fontSize = 12.sp)
+    }
+}
+
+/** The cyan primary pill. Decorative inside an already-clickable block. */
+@Composable
+private fun PrimaryPill(text: String) {
+    Text(
+        text, color = NeonMV.OnAccent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(NeonMV.Cyan)
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+    )
 }
 
 @Composable
@@ -324,19 +356,18 @@ private fun FastingHalf(data: YouData, zone: ZoneId, modifier: Modifier, onClick
     val f = data.fasting?.takeIf { it.isActive }
     val target = f?.targetHours
     Column(
-        modifier.clip(NeonCardShape).clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier.clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick),
+        horizontalAlignment = Alignment.Start,
     ) {
-        Text("FASTING", color = NeonMV.Cyan, fontFamily = NeonNumberFamily, fontSize = 11.sp,
-            fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
-        Spacer(Modifier.height(8.dp))
+        BlockLabel("Fasting", NeonMV.Cyan)
+        Spacer(Modifier.height(10.dp))
         NeonRing(
             // elapsed / target, both from /fasting/current. No target, no
             // fraction — the ring stays empty rather than assume 16h.
             fraction = if (f != null && target != null && target > 0) (f.elapsedH / target).toFloat() else 0f,
             color = NeonMV.Cyan,
-            size = 112.dp,
-            stroke = 9.dp,
+            size = 140.dp,
+            stroke = 12.dp,
             // UI-F5: a tick at each stage threshold the server sends that
             // falls inside the target — the same stages the Fasting ring
             // marks. Nothing is drawn without a target to scale against.
@@ -344,34 +375,41 @@ private fun FastingHalf(data: YouData, zone: ZoneId, modifier: Modifier, onClick
                 f.stages.map { (it.atH / target).toFloat() }.filter { it > 0f && it < 1f }
             else emptyList(),
         ) {
-            when {
-                f != null -> {
-                    // "14.3h" over "OF 16H" — never "14:16", which reads as
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (f != null) {
+                    // "14.3h" over "of 16h" — never "14:16", which reads as
                     // a clock time.
-                    NeonNumber("%.1fh".format(f.elapsedH), color = NeonMV.Ink, size = 22)
-                    NeonRingCaption(if (target != null) "of ${trimNum(target)}h" else "no target")
+                    Text(
+                        "%.1fh".format(f.elapsedH), color = NeonMV.Ink, fontSize = 28.sp,
+                        fontFamily = NeonNumberFamily, fontWeight = FontWeight.Medium,
+                        letterSpacing = (-0.5).sp,
+                    )
+                    Text(if (target != null) "of ${trimNum(target)}h" else "no target",
+                        color = NeonMV.Muted, fontSize = 11.sp)
+                } else {
+                    Text("—", color = NeonMV.Muted, fontSize = 28.sp, fontFamily = NeonNumberFamily)
                 }
-                else -> NeonNumber("—", color = NeonMV.Muted, size = 22)
             }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(10.dp))
         when {
             f != null -> {
                 Text(
                     STAGE_LABELS[f.currentStage] ?: f.currentStage.replace('_', ' ')
                         .replaceFirstChar { it.uppercase() },
-                    color = NeonMV.Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    color = NeonMV.Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
                 fastEnds(f, zone)?.let {
-                    Text(it, color = NeonMV.Muted, fontSize = 11.sp)
+                    Text(it.replaceFirstChar { c -> c.uppercase() }, color = NeonMV.Muted, fontSize = 11.sp)
                 }
             }
             // Only a SUCCESSFUL "no active fast" may say this.
-            data.fastingKnown -> Text(
-                "Not fasting · Start", color = NeonMV.Cyan, fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
+            data.fastingKnown -> {
+                Text("Not fasting", color = NeonMV.Muted, fontSize = 11.sp)
+                Spacer(Modifier.height(6.dp))
+                PrimaryPill("Start a fast")
+            }
             else -> Text("Couldn't load", color = NeonMV.Muted, fontSize = 11.sp)
         }
     }
@@ -394,36 +432,39 @@ private fun SoberHalf(data: YouData, zone: ZoneId, modifier: Modifier, onClick: 
     val s = data.sober
     val active = s?.active
     Column(
-        modifier.clip(NeonCardShape).clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier.clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick),
+        horizontalAlignment = Alignment.Start,
     ) {
-        Text("SOBER", color = NeonMV.Magenta, fontFamily = NeonNumberFamily, fontSize = 11.sp,
-            fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
-        Spacer(Modifier.height(18.dp))
-        when {
-            active != null -> {
-                val days = s?.days ?: floor(active.days).toInt()
-                // Magenta always. The count is never a warning colour, and
-                // a reset is never one either — it simply starts again.
-                NeonNumber(days.toString(), color = NeonMV.Magenta, size = 44)
-                Text(if (days == 1) "day" else "days", color = NeonMV.Muted, fontSize = 12.sp)
-                sinceLabel(active.startAt, zone)?.let {
-                    Spacer(Modifier.height(10.dp))
-                    Text(it, color = NeonMV.Muted, fontSize = 11.sp)
+        BlockLabel("Sober", NeonMV.Magenta)
+        // Same height as the fasting ring so the two blocks' text lines up.
+        Box(Modifier.height(150.dp), contentAlignment = Alignment.CenterStart) {
+            when {
+                active != null -> {
+                    val days = s?.days ?: floor(active.days).toInt()
+                    // Ink, never a warning colour — the count is never a
+                    // warning, and a reset is never one either. The magenta
+                    // bar carries the identity.
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(
+                            days.toString(), color = NeonMV.Ink, fontSize = 58.sp,
+                            fontFamily = NeonNumberFamily, fontWeight = FontWeight.Medium,
+                            letterSpacing = (-2).sp,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (days == 1) "day" else "days", color = NeonMV.Muted,
+                            fontSize = 14.sp, modifier = Modifier.padding(bottom = 12.dp))
+                    }
                 }
+                else -> Text("—", color = NeonMV.Muted, fontSize = 58.sp, fontFamily = NeonNumberFamily)
             }
-            s != null -> {
-                // A real answer with no active streak: neutral, an invitation.
-                NeonNumber("—", color = NeonMV.Muted, size = 44)
-                Spacer(Modifier.height(10.dp))
-                Text("Start counting", color = NeonMV.Ink, fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold)
+        }
+        when {
+            active != null -> sinceLabel(active.startAt, zone)?.let {
+                Text(it.replaceFirstChar { c -> c.uppercase() }, color = NeonMV.Muted, fontSize = 11.sp)
             }
-            else -> {
-                NeonNumber("—", color = NeonMV.Muted, size = 44)
-                Spacer(Modifier.height(10.dp))
-                Text("Couldn't load", color = NeonMV.Muted, fontSize = 11.sp)
-            }
+            // A real answer with no active streak: neutral, an invitation.
+            s != null -> PrimaryPill("Start counting")
+            else -> Text("Couldn't load", color = NeonMV.Muted, fontSize = 11.sp)
         }
     }
 }
@@ -484,8 +525,7 @@ private fun GoalRing(g: AiGoal, modifier: Modifier) {
         modifier
             .clip(NeonCardShape)
             .background(NeonMV.Card)
-            .border(1.dp, NeonMV.Line, NeonCardShape)
-            .padding(horizontal = 8.dp, vertical = 12.dp),
+            .padding(horizontal = 8.dp, vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         NeonRing(
@@ -502,7 +542,7 @@ private fun GoalRing(g: AiGoal, modifier: Modifier) {
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            g.title, color = NeonMV.Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+            g.title, color = NeonMV.Ink, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
             maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
             lineHeight = 15.sp,
         )
@@ -544,21 +584,17 @@ private fun NavGrid(onOpen: (String) -> Unit) {
                             .weight(1f)
                             .clip(NeonCardShape)
                             .background(NeonMV.Card)
-                            .border(1.dp, NeonMV.Line, NeonCardShape)
                             .clickable { onOpen(t.route) }
-                            .padding(vertical = 14.dp),
+                            .padding(vertical = 16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Box(
-                            Modifier.size(38.dp).clip(CircleShape).background(t.tint.copy(alpha = 0.14f)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(t.icon, contentDescription = null, tint = t.tint,
-                                modifier = Modifier.size(20.dp))
-                        }
+                        // Tinted glyph only; the filled circle behind it was a
+                        // second colour field per tile.
+                        Icon(t.icon, contentDescription = null, tint = t.tint,
+                            modifier = Modifier.size(24.dp))
                         Spacer(Modifier.height(8.dp))
                         Text(t.label, color = NeonMV.Ink, fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold)
+                            fontWeight = FontWeight.Medium)
                     }
                 }
             }

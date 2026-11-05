@@ -10,7 +10,9 @@
  *   VALUE unit    large, LIGHT weight — the thing you came for
  *   qualifier     "Today", "Today • 9,038 to go", or a date when carried
  *   chart         7 days, full card width, weekday letters, today emphasised
- *   [chip]        "In range" / "Goal not met" — filled, not outlined
+ *   [chip]        "In range" / "Goal not met" — a filled amber pill ONLY for
+ *                 "watch"; good/typical render as plain text so colour
+ *                 marks the one card that needs attention
  *
  * Stacked vertically rather than value-beside-chart: in a 2-up grid a fixed
  * chart column collides with the value as soon as the card narrows, and the
@@ -86,12 +88,14 @@ const CHIP: Record<string, { fg: string; bg: string; text: string }> = {
   // Semantic — these encode a verdict, not a domain — but drawn from the
   // shell's own ramp (lime / muted / amber) rather than the classic mint and
   // sand, which read as a different app's chips sitting on a neon card.
-  good: { fg: "#5dff3b", bg: "rgba(93,255,59,.13)", text: "In range" },
-  typical: { fg: "#9b9bb0", bg: "rgba(155,155,176,.12)", text: "In range" },
+  // Only "watch" is a filled pill. A grid where every card wears a pill
+  // gives the one out-of-range card nothing to stand out against.
+  good: { fg: "#5dff3b", bg: "transparent", text: "In range" },
+  typical: { fg: "#9b9bb0", bg: "transparent", text: "In range" },
   watch: { fg: "#ffb52e", bg: "rgba(255,181,46,.14)", text: "Out of range" },
 };
 
-const NO_DATA_CHIP = { fg: "#9b9bb0", bg: "rgba(155,155,176,.12)", text: "No data" };
+const NO_DATA_CHIP = { fg: "#9b9bb0", bg: "transparent", text: "No data" };
 
 /** Every card carries a chip. The reference does this — an empty metric
  *  shows "No data" rather than nothing — and it is also what keeps the two
@@ -269,7 +273,7 @@ const valueSize = computed(() => {
 
     <span
       v-if="deltaChip" class="delta"
-      :style="{ color: deltaChip.tone, background: `color-mix(in srgb, ${deltaChip.tone} 12%, transparent)` }"
+      :style="{ color: deltaChip.tone }"
     >{{ deltaChip.text }}</span>
 
     <!-- With nothing to plot, the chart area was a blank rectangle the height
@@ -330,7 +334,7 @@ const valueSize = computed(() => {
     </div>
 
     <span
-      v-if="chip" class="chip"
+      v-if="chip" class="chip" :class="{ pill: chip.bg !== 'transparent' }"
       :style="{ color: chip.fg, background: chip.bg }"
     >{{ chip.text }}</span>
   </div>
@@ -339,7 +343,7 @@ const valueSize = computed(() => {
 <style scoped>
 .delta {
   align-self: flex-start; font-size: .68rem; font-weight: 600;
-  border-radius: 999px; padding: 3px 9px; margin-top: 5px;
+  margin-top: 5px;
   font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 
@@ -351,11 +355,11 @@ const valueSize = computed(() => {
 
 .mc {
   background: var(--mc-surface, #181b27);
-  /* Hairline in this card's own domain accent, so a grid reads as a set of
-     domains rather than eight identical slabs. */
-  border: 1px solid color-mix(in srgb, var(--mc-accent, #28e6ff) 16%, transparent);
+  /* Flat surface, no domain-tinted hairline: the chart line already says
+     which domain a card belongs to, and eight tinted borders competed with
+     the one amber chip that actually needs attention. */
   border-radius: 20px;
-  padding: 14px 14px 12px;
+  padding: 16px 16px 14px;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -375,23 +379,23 @@ const valueSize = computed(() => {
    other way, and on a card whose entire job is one number, weight IS the
    hierarchy. Tight tracking keeps a four-character value on one line at 2-up. */
 .value {
-  font-size: 2.5rem;
-  font-weight: 700;
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  font-size: 2.2rem;
+  font-weight: 500;
   color: #ececf5;
-  line-height: 1.02;
-  letter-spacing: -0.045em;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-shadow: 0 0 16px color-mix(in srgb, var(--mc-accent, #28e6ff) 28%, transparent);
   font-variant-numeric: tabular-nums;
 }
 .value.nodata { font-size: 1.45rem; font-weight: 300; letter-spacing: -0.5px; }
 /* Step down for long values, matching the phone's MetricCard. "121/78" at
    2.5rem filled a 2-up card and the ellipsis ate the unit. */
-.value.v6 { font-size: 2rem; }
-.value.v7 { font-size: 1.75rem; }
+.value.v6 { font-size: 1.85rem; }
+.value.v7 { font-size: 1.6rem; }
 .unit { font-size: .85rem; font-weight: 400; color: #9b9bb0; margin-left: 4px; }
 .qual { font-size: .7rem; color: #9b9bb0; margin-top: 2px; }
 
@@ -417,11 +421,9 @@ const valueSize = computed(() => {
   /* Anchored to the bottom so chips line up across a row and a missing
      chart becomes balanced padding rather than a short card. */
   margin-top: auto;
-  font-size: .66rem;
-  font-weight: 500;
+  font-size: .72rem;
   margin-block-start: 10px;
-  padding: 3px 9px;
-  border-radius: 999px;
   white-space: nowrap;
 }
+.chip.pill { padding: 3px 9px; border-radius: 999px; font-weight: 500; }
 </style>

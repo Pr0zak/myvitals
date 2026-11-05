@@ -143,7 +143,7 @@ const weeklyOption = computed(() => {
         const p = ps[0];
         const row = tr.find((r) => r.week_start === p.name);
         return `Week of ${p.name}<br/>${Math.round(p.value).toLocaleString()} lb`
-          + (row ? ` · ${row.sets} sets · ${row.workouts} workouts` : "");
+          + (row ? `, ${row.sets} sets, ${row.workouts} workouts` : "");
       },
     },
     xAxis: {
@@ -346,11 +346,11 @@ const rpeDenominator = computed(() => {
         Need at least 2 sessions in this window for a daily-volume chart.
       </p>
 
-      <Card v-if="weeklyOption" title="Weekly volume · 16-week mesocycle">
+      <Card v-if="weeklyOption" title="Weekly volume, 16-week mesocycle">
         <div class="chart"><VChart :option="weeklyOption" autoresize /></div>
       </Card>
 
-      <Card title="Muscle balance · 7-day">
+      <Card title="Muscle balance, last 7 days">
         <BodyMap :muscles="muscleVol" />
       </Card>
 
@@ -485,14 +485,38 @@ html[data-theme="neon"] .charts {
 html[data-theme="neon"] .charts header h1 {
   font-weight: 800; letter-spacing: -0.5px; color: var(--rn-ink);
 }
+html[data-theme="neon"] .charts .val { font-weight: 500; }
 html[data-theme="neon"] .charts .range {
   border: 1px solid #ffffff14; background: #ffffff08; color: var(--rn-mut);
   border-radius: 999px;
 }
+/* The selected range is a control state, not data: the one lead accent,
+   no glow. */
 html[data-theme="neon"] .charts .range.on {
-  background: rgba(255, 58, 216, 0.16); color: var(--rn-mag);
-  border-color: rgba(255, 58, 216, 0.45);
-  box-shadow: 0 0 12px rgba(255, 58, 216, 0.28);
+  background: rgba(40, 230, 255, 0.14); color: #28e6ff;
+  border-color: transparent;
+}
+/* Flat chart cards with sentence-case titles. Card.vue is shared, so the
+   override is scoped to this page under the neon theme. */
+html[data-theme="neon"] .charts :deep(.card) {
+  background: var(--rn-card); border: 0; border-radius: 20px;
+}
+html[data-theme="neon"] .charts :deep(.card h2) {
+  text-transform: none; letter-spacing: 0; font-size: 15px;
+  font-weight: 500; color: var(--rn-ink);
+}
+html[data-theme="neon"] .charts .lbl {
+  text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 0.75rem;
+}
+html[data-theme="neon"] .charts .records th {
+  text-transform: none; letter-spacing: 0; font-weight: 400;
+}
+html[data-theme="neon"] .charts .rec-kind { text-transform: none; letter-spacing: 0; }
+html[data-theme="neon"] .charts .lbl {
+  text-transform: none; letter-spacing: 0; font-weight: 400; font-size: .75rem;
+}
+html[data-theme="neon"] .charts .records th {
+  text-transform: none; letter-spacing: 0; font-weight: 400;
 }
 html[data-theme="neon"] .charts .muted,
 html[data-theme="neon"] .charts .lbl { color: var(--rn-mut); }

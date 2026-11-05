@@ -90,10 +90,7 @@ import app.myvitals.ui.activities.NeonIconButton
 import app.myvitals.ui.activities.NeonPill
 import app.myvitals.ui.activities.StaleBanner
 import app.myvitals.ui.neon.NeonCardShape
-import app.myvitals.ui.neon.NeonEyebrow
-import app.myvitals.ui.neon.NeonHeroCard
 import app.myvitals.ui.neon.NeonMV
-import app.myvitals.ui.neon.NeonNumber
 import app.myvitals.ui.neon.NeonNumberFamily
 import app.myvitals.ui.neon.NeonScreen
 import kotlinx.coroutines.Dispatchers
@@ -267,7 +264,7 @@ fun TrailsScreen(
         try {
             val api = BackendClient.create(settings.backendUrl, settings.bearerToken)
             val r = withContext(Dispatchers.IO) { api.linkAllActivitiesToTrails() }
-            actionResult = "Linked ${r.linked} new · ${r.alreadyLinkedSkipped} already · ${r.noMatchWithinKm} no match"
+            actionResult = "Linked ${r.linked} new, ${r.alreadyLinkedSkipped} already linked, ${r.noMatchWithinKm} with no match"
             load()
         } catch (e: Exception) {
             Timber.w(e, "linkActivities failed")
@@ -283,7 +280,7 @@ fun TrailsScreen(
             val r = withContext(Dispatchers.IO) { api.fetchAllTrailOsmPaths() }
             actionResult = if (r.fetched == 0 && r.skipped > 0)
                 "All ${r.skipped} routes already cached. Tap a trail to view."
-                else "OSM: ${r.fetched} fetched · ${r.skipped} cached · ${r.failed} failed"
+                else "OSM: ${r.fetched} fetched, ${r.skipped} cached, ${r.failed} failed"
             osmCacheEpoch++
         } catch (e: Exception) {
             Timber.w(e, "fetchOsmRoutes failed")
@@ -399,7 +396,7 @@ fun TrailsScreen(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text("Edit pin · ${t.name}", color = NeonMV.Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text("Edit pin for ${t.name}", color = NeonMV.Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 Text("Decimal degrees. Tip: tap & hold a spot in Google Maps and the lat/lon pair appears at the top.",
                     color = NeonMV.Muted, fontSize = 11.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -601,7 +598,6 @@ fun TrailsContent(
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 12.dp)
                     .clip(NeonCardShape).background(NeonMV.Card)
-                    .border(1.dp, NeonMV.Cyan.copy(alpha = 0.30f), NeonCardShape)
                     .padding(start = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -611,10 +607,10 @@ fun TrailsContent(
         }
 
         when {
-            trails.isEmpty() && loading -> NeonHeroCard(accent = NeonMV.Lime) {
-                NeonEyebrow("Trail status", Modifier.padding(top = 0.dp))
-                Text("Loading trail status…", color = NeonMV.Muted, fontSize = 13.sp)
-            }
+            trails.isEmpty() && loading -> Text(
+                "Loading trail status…", color = NeonMV.Muted, fontSize = 13.sp,
+                modifier = Modifier.padding(vertical = 24.dp),
+            )
             // A failed first load is not "no trails seeded": the banner says why.
             trails.isEmpty() && error != null -> Unit
             trails.isEmpty() -> Text(
@@ -626,7 +622,7 @@ fun TrailsContent(
                 StatusHero(ui, nowMs, onOpenMap, miniMap)
                 val starred = remember(trails) { trails.filter { it.subscribed } }
                 if (starred.isNotEmpty()) {
-                    NeonEyebrow("Your trails")
+                    TrailsHeading("Your trails")
                     Row(
                         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -639,7 +635,7 @@ fun TrailsContent(
                     "Closed" to grouped.closed, "Other" to grouped.other,
                 )) {
                     if (list.isEmpty()) continue
-                    NeonEyebrow("$label · ${list.size}")
+                    TrailsHeading(label, count = list.size)
                     list.forEach { t ->
                         TrailRow(
                             t, nowMs, dense = dense, expanded = expandedId == t.id,
@@ -653,7 +649,9 @@ fun TrailsContent(
                     }
                 }
                 if (recentRides.isNotEmpty()) {
-                    NeonEyebrow("Recent rides · tap to link a trail")
+                    TrailsHeading("Recent rides")
+                    Text("Tap one to link it to a trail", color = NeonMV.Muted, fontSize = 12.sp,
+                        modifier = Modifier.padding(bottom = 8.dp))
                     recentRides.forEach { ride ->
                         RideLinkRow(ride, nowMs) { onLinkRide(ride) }
                         Spacer(Modifier.height(8.dp))
@@ -696,6 +694,12 @@ private fun statusColor(status: String?): Color = when (status) {
     else -> NeonMV.Muted
 }
 
+/**
+ * Trails hero in the Today-brief language (twin of `Trails.vue`): on the page
+ * ground, no card. The open count left, one legend row per status right, the
+ * status bar full width, then a quiet status line (sync age) and the map
+ * preview as a flat card. Counts are the server's `status_counts`.
+ */
 @Composable
 private fun StatusHero(
     ui: TrailsUi,
@@ -705,49 +709,60 @@ private fun StatusHero(
 ) {
     val c = ui.counts
     val total = c?.let { it.open + it.delayed + it.closed + it.other } ?: 0
-    NeonHeroCard(accent = NeonMV.Lime) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            NeonEyebrow("Trail status", Modifier.padding(top = 0.dp).weight(1f))
-            val synced = fmtAge(ui.syncedAt, nowMs)
-            if (synced.isNotEmpty()) {
-                NeonPill("synced ${synced.removeSuffix(" ago")}", color = NeonMV.Periwinkle,
-                    modifier = Modifier.padding(bottom = 8.dp))
-            }
-        }
+    Column(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 20.dp)) {
         if (c == null) {
             // An older backend without server counts: say nothing rather than
             // count on the phone.
             Text("Status counts unavailable", color = NeonMV.Muted, fontSize = 13.sp)
         } else {
-            Row(verticalAlignment = Alignment.Bottom) {
-                NeonNumber("${c.open}", color = NeonMV.Lime, size = 56)
-                Spacer(Modifier.width(10.dp))
-                Text("of $total open", color = NeonMV.Ink, fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.width(150.dp)) {
+                    Text("${c.open}", color = NeonMV.Ink, fontSize = 72.sp,
+                        fontFamily = NeonNumberFamily, fontWeight = FontWeight.Medium,
+                        letterSpacing = (-2).sp, lineHeight = 72.sp)
+                    Text("of $total open", color = NeonMV.Muted, fontSize = 15.sp)
+                }
+                Spacer(Modifier.width(18.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for ((n, label, col) in listOf(
+                        Triple(c.open, "Open", NeonMV.Lime),
+                        Triple(c.delayed, "Delayed", NeonMV.Amber),
+                        Triple(c.closed, "Closed", NeonMV.Bad),
+                        Triple(c.other, "Unknown", NeonMV.Muted),
+                    )) {
+                        if (n <= 0 && label != "Open" && label != "Closed") continue
+                        LegendCount(n, label, col)
+                    }
+                }
             }
             if (total > 0) {
-                Row(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp))) {
+                Spacer(Modifier.height(18.dp))
+                Row(
+                    Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
                     for ((n, col) in listOf(c.open to NeonMV.Lime, c.delayed to NeonMV.Amber,
                         c.closed to NeonMV.Bad, c.other to NeonMV.Track)) {
                         if (n > 0) Box(Modifier.weight(n.toFloat()).fillMaxHeight().background(col))
                     }
                 }
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    LegendCount(c.open, "open", NeonMV.Lime)
-                    if (c.delayed > 0) LegendCount(c.delayed, "delayed", NeonMV.Amber)
-                    LegendCount(c.closed, "closed", NeonMV.Bad)
-                    if (c.other > 0) LegendCount(c.other, "unknown", NeonMV.Muted)
-                }
+            }
+        }
+        val synced = fmtAge(ui.syncedAt, nowMs)
+        if (synced.isNotEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(6.dp).clip(CircleShape).background(NeonMV.Lime))
+                Spacer(Modifier.width(8.dp))
+                Text("From the trail status board", color = NeonMV.Ink.copy(alpha = 0.85f), fontSize = 13.sp)
+                Spacer(Modifier.weight(1f))
+                Text("Synced $synced", color = NeonMV.Muted, fontSize = 12.sp)
             }
         }
         if (ui.trails.any { it.latitude != null && it.longitude != null }) {
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(16.dp))
             // Non-interactive preview; the whole box is the button.
-            Box(
-                Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(16.dp))
-                    .border(1.dp, NeonMV.Line, RoundedCornerShape(16.dp)),
-            ) {
+            Box(Modifier.fillMaxWidth().height(150.dp).clip(NeonCardShape)) {
                 miniMap(Modifier.fillMaxSize())
                 Box(
                     Modifier.fillMaxSize().clickable(
@@ -763,20 +778,38 @@ private fun StatusHero(
     }
 }
 
+/** Sentence-case section heading with an optional muted count — replaces
+ *  the tracked-caps "OPEN · 5" eyebrow. */
+@Composable
+private fun TrailsHeading(text: String, count: Int? = null) {
+    Row(
+        Modifier.padding(top = 22.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        Text(text, color = NeonMV.Ink, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+        if (count != null) {
+            Spacer(Modifier.width(6.dp))
+            Text("$count", color = NeonMV.Muted, fontSize = 15.sp, fontFamily = NeonNumberFamily)
+        }
+    }
+}
+
 @Composable
 private fun LegendCount(n: Int, label: String, color: Color) {
+    // TodayBrief's legend: a 3dp colour bar, muted label, number-face value.
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(8.dp).clip(CircleShape).background(color))
-        Spacer(Modifier.width(5.dp))
-        Text("$n $label", color = NeonMV.Muted, fontSize = 12.sp, fontFamily = NeonNumberFamily)
+        Box(Modifier.size(width = 3.dp, height = 20.dp).background(color, RoundedCornerShape(2.dp)))
+        Spacer(Modifier.width(10.dp))
+        Text(label, color = NeonMV.Muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        Text("$n", color = NeonMV.Ink, fontSize = 20.sp, fontFamily = NeonNumberFamily,
+            fontWeight = FontWeight.Medium)
     }
 }
 
 @Composable
 private fun StatusDot(color: Color, size: Int = 14) {
     Box(Modifier.size(size.dp), contentAlignment = Alignment.Center) {
-        Box(Modifier.size(size.dp).clip(CircleShape).background(color.copy(alpha = 0.22f)))
-        Box(Modifier.size((size * 0.6f).dp).clip(CircleShape).background(color))
+        Box(Modifier.size((size * 0.7f).dp).clip(CircleShape).background(color))
     }
 }
 
@@ -786,15 +819,14 @@ private fun StarredTile(t: Trail, nowMs: Long, onClick: () -> Unit) {
     val col = statusColor(t.status)
     Column(
         Modifier.width(150.dp).clip(NeonCardShape).background(NeonMV.Card)
-            .border(1.dp, col.copy(alpha = 0.30f), NeonCardShape)
             .clickable(enabled = t.visitsTotal > 0, onClick = onClick)
             .padding(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             StatusDot(col, 12)
             Spacer(Modifier.width(6.dp))
-            Text((t.status ?: "unknown").uppercase(), color = col, fontFamily = NeonNumberFamily,
-                fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Text((t.status ?: "unknown").replaceFirstChar { it.uppercase() }, color = col,
+                fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.height(6.dp))
         Text(t.name, color = NeonMV.Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
@@ -825,7 +857,6 @@ private fun TrailRow(
     val hasLocation = t.latitude != null && t.longitude != null
     Column(
         Modifier.fillMaxWidth().clip(NeonCardShape).background(NeonMV.Card)
-            .border(1.dp, color.copy(alpha = 0.18f), NeonCardShape)
             .combinedClickable(
                 // Condensed rows hide the status message, so a tap there must
                 // open the row even for a trail with no pin to map.
@@ -846,7 +877,7 @@ private fun TrailRow(
                     val meta = listOfNotNull(
                         fmtAge(t.sourceTs ?: t.fetchedAt, nowMs).takeIf { it.isNotEmpty() },
                         listOfNotNull(t.city, t.state).joinToString(", ").takeIf { it.isNotEmpty() },
-                    ).joinToString(" · ")
+                    ).joinToString(", ")
                     if (meta.isNotEmpty()) Text(meta, color = NeonMV.Muted, fontSize = 12.sp)
                     if (t.visitsTotal > 0) {
                         Spacer(Modifier.height(6.dp))
@@ -895,7 +926,6 @@ private fun VisitChip(t: Trail, nowMs: Long, onClick: () -> Unit) {
     Row(
         Modifier.heightIn(min = 32.dp).clip(RoundedCornerShape(16.dp))
             .background(c.copy(alpha = 0.10f))
-            .border(1.dp, c.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
             .clickable(onClickLabel = "Show linked activities", onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -905,7 +935,7 @@ private fun VisitChip(t: Trail, nowMs: Long, onClick: () -> Unit) {
         Spacer(Modifier.width(6.dp))
         Text(
             "${t.visitsTotal} ride${if (t.visitsTotal == 1) "" else "s"}" +
-                (t.lastVisitAt?.let { " · ${fmtAge(it, nowMs)}" } ?: ""),
+                (t.lastVisitAt?.let { ", last ${fmtAge(it, nowMs)}" } ?: ""),
             color = c, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
         )
         Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = c,
@@ -958,10 +988,9 @@ private fun RideLinkRow(ride: ActivityRow, nowMs: Long, onTap: () -> Unit) {
         fmtAge(ride.startAt, nowMs).takeIf { it.isNotEmpty() },
         ride.distanceM?.let { Units.fmtDistance(it, 1) },
         typeLabel.takeIf { it.isNotEmpty() },
-    ).joinToString(" · ")
+    ).joinToString(", ")
     Row(
         Modifier.fillMaxWidth().clip(NeonCardShape).background(NeonMV.Card)
-            .border(1.dp, NeonMV.Line, NeonCardShape)
             .clickable { onTap() }
             .heightIn(min = 56.dp)
             .padding(horizontal = 14.dp, vertical = 10.dp),
@@ -988,7 +1017,7 @@ private fun RideLinkRow(ride: ActivityRow, nowMs: Long, onTap: () -> Unit) {
 private fun rideSubtitle(ride: ActivityRow): String {
     val mi = Units.fmtDistance(ride.distanceM, 1)
     val mins = ride.durationS / 60
-    return "${ride.type} · $mi · ${mins}m"
+    return "${ride.type}, $mi, ${mins}m"
 }
 
 /** Visit-recency colour scale, matching the web's age-fresh → age-stale ramp. */

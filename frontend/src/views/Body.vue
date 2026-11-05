@@ -5,7 +5,8 @@
  *
  *   hero     recovery ring (the recovery tile's value and server wording),
  *            HRV / resting HR / sleep beside it with their server deltas,
- *            and "N of M vitals in range · synced Xm ago" from the rollup
+ *            then one status line: "N of M vitals in your range" and the
+ *            sync age, from the rollup
  *   daily    2-up MetricCards with a taller spark
  *   by hand  weight, blood pressure, skin temp as compact rows with the
  *            reading's own date and a 14-day reading strip
@@ -24,7 +25,6 @@ import { api } from "@/api/client";
 import type { VitalTile, VitalTilesResponse } from "@/api/types";
 import KeyMetrics from "@/components/KeyMetrics.vue";
 import NeonPage from "@/components/neon/NeonPage.vue";
-import NeonHero from "@/components/neon/NeonHero.vue";
 import NeonRing from "@/components/neon/NeonRing.vue";
 
 const router = useRouter();
@@ -58,8 +58,6 @@ const recChip = computed(() => {
   if (r) return r[0].toUpperCase() + r.slice(1);
   return recValue.value == null ? "No reading yet" : null;
 });
-const TONE: Record<string, string> = { good: "#5dff3b", typical: "#9b9bb0", watch: "#ffb52e" };
-const recTone = computed(() => TONE[rec.value?.status ?? ""] ?? "#9b9bb0");
 
 function asOf(t: VitalTile | null): string | null {
   if (!t || t.stale_days == null || t.stale_days <= 0 || !t.as_of) return null;
@@ -103,13 +101,17 @@ function syncAge(iso: string | null | undefined): string | null {
   return `${Math.floor(min / 1440)}d ago`;
 }
 
-const footer = computed(() => {
+const rollText = computed(() => {
   const s = data.value?.summary;
-  const parts: string[] = [];
-  if (s && s.judged > 0) parts.push(`${s.in_range} of ${s.judged} vitals in range`);
+  return s && s.judged > 0 ? `${s.in_range} of ${s.judged} vitals in your range` : null;
+});
+const rollWarn = computed(() => {
+  const s = data.value?.summary;
+  return !!s && s.in_range < s.judged;
+});
+const syncText = computed(() => {
   const age = syncAge(data.value?.last_sync);
-  if (age) parts.push(`synced ${age}`);
-  return parts.join(" · ");
+  return age ? `Synced ${age}` : null;
 });
 </script>
 
@@ -143,40 +145,48 @@ const footer = computed(() => {
       </div>
 
       <template v-else>
-        <NeonHero accent="#28e6ff">
-          <div class="hero">
-            <button class="rcol" @click="router.push('/trends')">
-              <NeonRing :fraction="(recValue ?? 0) / 100" color="#28e6ff" :size="108" :stroke="9">
-                <div class="rv" :class="{ mut: recValue == null }">{{ recValue != null ? fmt(recValue) : "—" }}</div>
-                <div class="rc">RECOVERY</div>
-              </NeonRing>
-              <span v-if="recChip" class="chip"
-                    :style="{ color: recTone, background: `color-mix(in srgb, ${recTone} 13%, transparent)` }">
-                {{ recChip }}
-              </span>
-              <span v-if="asOf(rec)" class="asof">{{ asOf(rec) }}</span>
-            </button>
-            <div class="drivers">
-              <template v-for="d in DRIVERS" :key="d.key">
-                <button v-if="byKey[d.key]" class="drv" @click="router.push(d.route)">
-                  <span class="dl">{{ byKey[d.key]!.label }}</span>
-                  <span class="dv">
-                    <b :style="{ color: byKey[d.key]!.value != null ? d.color : '#9b9bb0' }">{{ fmt(byKey[d.key]!.value) }}</b>
-                    <small v-if="byKey[d.key]!.value != null && byKey[d.key]!.unit">{{ byKey[d.key]!.unit }}</small>
-                    <i v-if="deltaChip(byKey[d.key]!)" :style="{ color: deltaChip(byKey[d.key]!)!.color }">
-                      {{ deltaChip(byKey[d.key]!)!.text }}
-                    </i>
-                    <!-- Sleep is judged against a target, not a baseline, so
-                         it carries no delta; name the target instead. -->
-                    <i v-else-if="d.key === 'sleep_duration' && byKey[d.key]!.value != null && byKey[d.key]!.target != null"
-                       class="mut">of {{ fmt(byKey[d.key]!.target ?? null) }}h</i>
+        <!-- Hero on the page ground, in the Today brief's language: the
+             ring on the left, a coloured-bar legend on the right carrying
+             the numbers, then one quiet status line. -->
+        <section class="brief">
+          <button class="rcol" aria-label="Recovery trend" @click="router.push('/trends')">
+            <NeonRing :fraction="(recValue ?? 0) / 100" color="#28e6ff" :size="176" :stroke="13">
+              <div class="rv" :class="{ mut: recValue == null }">{{ recValue != null ? fmt(recValue) : "—" }}</div>
+              <div class="rc">Recovery</div>
+            </NeonRing>
+          </button>
+          <div class="legend">
+            <template v-for="d in DRIVERS" :key="d.key">
+              <button v-if="byKey[d.key]" class="row" @click="router.push(d.route)">
+                <span class="bar" :style="{ background: d.color }" />
+                <span class="txt">
+                  <span class="lab">{{ byKey[d.key]!.label }}</span>
+                  <span class="val">
+                    {{ fmt(byKey[d.key]!.value) }}<small v-if="byKey[d.key]!.value != null && byKey[d.key]!.unit"> {{ byKey[d.key]!.unit }}</small>
                   </span>
-                </button>
-              </template>
-            </div>
+                  <span v-if="deltaChip(byKey[d.key]!)" class="sub" :style="{ color: deltaChip(byKey[d.key]!)!.color }">
+                    {{ deltaChip(byKey[d.key]!)!.text }} vs your normal
+                  </span>
+                  <!-- Sleep is judged against a target, not a baseline, so
+                       it carries no delta; name the target instead. -->
+                  <span v-else-if="d.key === 'sleep_duration' && byKey[d.key]!.value != null && byKey[d.key]!.target != null"
+                        class="sub">of {{ fmt(byKey[d.key]!.target ?? null) }}h</span>
+                </span>
+              </button>
+            </template>
           </div>
-          <div v-if="footer" class="foot">{{ footer }}</div>
-        </NeonHero>
+        </section>
+        <div v-if="rollText || recChip || syncText" class="status">
+          <template v-if="rollText">
+            <span class="dot" :class="{ warn: rollWarn }" />
+            <span class="stext">{{ rollText }}</span>
+          </template>
+          <span v-else-if="recChip" class="stext" :style="{ color: rec?.status === 'watch' ? '#ffb52e' : undefined }">{{ recChip }}</span>
+          <span v-if="syncText" class="sync">{{ syncText }}</span>
+        </div>
+        <p v-if="rollText && recChip" class="recnote" :class="{ watch: rec?.status === 'watch' }">
+          {{ recChip }}<template v-if="asOf(rec)">, {{ asOf(rec) }}</template>
+        </p>
 
         <KeyMetrics :data="data" :title="null" :exclude="['recovery']" tiered :chart-height="56" />
       </template>
@@ -185,24 +195,31 @@ const footer = computed(() => {
 </template>
 
 <style scoped>
-.hero { display: flex; align-items: center; gap: 16px; }
-.rcol { display: flex; flex-direction: column; align-items: center; gap: 8px; background: none; border: 0;
-  padding: 0; cursor: pointer; color: inherit; }
-.rv { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 700; font-size: 28px; color: #ececf5; }
+.brief { display: flex; align-items: center; gap: 18px; margin: 4px 0 0; max-width: 640px; }
+.rcol { flex: none; background: none; border: 0; padding: 0; cursor: pointer; color: inherit; border-radius: 50%; }
+.rv { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 500; font-size: 2.4rem;
+  letter-spacing: -1px; line-height: 1; color: #ececf5; font-variant-numeric: tabular-nums; }
 .rv.mut, .mut { color: #9b9bb0; }
-.rc { font-size: 9px; font-weight: 700; letter-spacing: .12em; color: #9b9bb0; }
-.chip { font-size: 10.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
-.asof { font-size: 10px; color: #9b9bb0; }
-.drivers { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
-.drv { display: flex; flex-direction: column; align-items: flex-start; background: none; border: 0; padding: 0;
-  cursor: pointer; color: inherit; text-align: left; }
-.dl { font-size: 11px; color: #9b9bb0; }
-.dv { display: flex; align-items: baseline; gap: 4px; }
-.dv b { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-size: 19px; font-weight: 700;
-  font-variant-numeric: tabular-nums; }
-.dv small { font-size: 11px; color: #9b9bb0; }
-.dv i { font-style: normal; font-size: 11px; font-weight: 600; margin-left: 4px; }
-.foot { border-top: 1px solid #23263a; margin-top: 12px; padding-top: 10px; font-size: 12px; color: #9b9bb0; }
+.rc { font-size: .7rem; color: #9b9bb0; margin-top: 4px; text-align: center; }
+.legend { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.row { display: flex; align-items: flex-start; gap: 10px; text-align: left; padding: 0; border: 0;
+  background: none; color: inherit; cursor: pointer; border-radius: 10px; }
+.bar { flex: none; width: 3px; height: 30px; margin-top: 5px; border-radius: 2px; }
+.txt { display: flex; flex-direction: column; min-width: 0; }
+.lab { font-size: .75rem; color: #9b9bb0; }
+.val { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-size: 1.25rem; font-weight: 500;
+  color: #ececf5; line-height: 1.25; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.val small { font-family: 'Plus Jakarta Sans', system-ui; font-size: .7rem; color: #9b9bb0; font-weight: 400; }
+.sub { font-size: .7rem; color: #9b9bb0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status { display: flex; align-items: center; gap: 8px; margin: 14px 0 0; max-width: 640px; }
+.dot { width: 6px; height: 6px; border-radius: 3px; background: #5dff3b; flex: none; }
+.dot.warn { background: #ffb52e; }
+.stext { font-size: .82rem; color: rgba(236, 236, 245, .85); }
+.sync { margin-left: auto; font-size: .75rem; color: #9b9bb0; }
+.recnote { margin: 6px 0 0; font-size: .75rem; color: #9b9bb0; }
+.recnote.watch { color: #ffb52e; }
+.status + *, .recnote + * { margin-top: 22px; }
+.rcol:focus-visible, .row:focus-visible { outline: 2px solid #28e6ff; outline-offset: 3px; }
 
 .errbar { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; cursor: pointer;
   background: rgba(255, 93, 122, .10); border: 1px solid rgba(255, 93, 122, .28); border-radius: 14px;
@@ -211,7 +228,7 @@ const footer = computed(() => {
 .errbar span { color: #9b9bb0; font-size: 12px; }
 .errbar em { color: #28e6ff; font-size: 12px; font-style: normal; font-weight: 600; }
 .empty { display: flex; flex-direction: column; align-items: center; gap: 7px; text-align: center;
-  background: #1e2230; border: 1px solid rgba(40, 230, 255, .22); border-radius: 18px; padding: 28px 20px; }
+  background: #181b27; border-radius: 20px; padding: 28px 20px; }
 .empty b { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-size: 15px; }
 .empty span { color: #9b9bb0; font-size: 12.5px; }
 

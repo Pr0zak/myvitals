@@ -1526,7 +1526,7 @@ function repsRange(wex: StrengthWorkoutExercise): string {
 }
 function setHeading(wex: StrengthWorkoutExercise, n: number): string {
   const side = bilateralSideLabel(wex, n);
-  const sideWord = side === "R" ? "Right side · " : side === "L" ? "Left side · " : "";
+  const sideWord = side === "R" ? "Right side, " : side === "L" ? "Left side, " : "";
   return `${sideWord}Set ${n} of ${wex.target_sets}`;
 }
 
@@ -1707,18 +1707,18 @@ function slotSummary(wex: StrengthWorkoutExercise): string {
 }
 function prescriptionShort(wex: StrengthWorkoutExercise): string {
   const unit = isTimedExercise(wex) ? "s" : "";
-  const w = wex.target_weight_lb != null ? ` · ${fmtLb(wex.target_weight_lb)} lb` : "";
+  const w = wex.target_weight_lb != null ? ` at ${fmtLb(wex.target_weight_lb)} lb` : "";
   return `${wex.target_sets}×${repsRange(wex)}${unit}${w}`;
 }
 /** The exercise card's prescription line as one string, for the hero's
- *  title row ("4×10 per side @ 25 lb · 105s rest"). Same server fields the
+ *  title row ("4×10 per side at 25 lb, 105s rest"). Same server fields the
  *  card prints: target_sets, the rep range, the per-side label, the slot
  *  weight and target_rest_s. */
 function prescriptionLine(wex: StrengthWorkoutExercise): string {
   const unit = isTimedExercise(wex) ? "s" : "";
   const side = sideLabel(wex);
-  const w = wex.target_weight_lb ? ` @ ${fmtLb(wex.target_weight_lb)} lb` : "";
-  return `${wex.target_sets}×${repsRange(wex)}${unit}${side ? ` ${side}` : ""}${w} · ${wex.target_rest_s}s rest`;
+  const w = wex.target_weight_lb ? ` at ${fmtLb(wex.target_weight_lb)} lb` : "";
+  return `${wex.target_sets}×${repsRange(wex)}${unit}${side ? ` ${side}` : ""}${w}, ${wex.target_rest_s}s rest`;
 }
 
 // ── Hero set pills (A + C layout, shared with the phone) ──────────────────
@@ -1736,7 +1736,7 @@ function setPills(wex: StrengthWorkoutExercise, current: number | null): PillKin
   }
   return out;
 }
-/** " · set k: 25×10 Good" for the most recently logged set of this exercise
+/** ", set k was 25×10 Good" for the most recently logged set of this exercise
  *  (highest set_number with actuals), or "" when nothing is logged yet. */
 function lastLoggedTail(wex: StrengthWorkoutExercise): string {
   const logged = wex.sets
@@ -1749,7 +1749,7 @@ function lastLoggedTail(wex: StrengthWorkoutExercise): string {
     ? `${s.actual_reps}s`
     : s.actual_weight_lb != null ? `${fmtLb(s.actual_weight_lb)}×${s.actual_reps}` : `${s.actual_reps}`;
   const rate = s.rating == null ? "" : ` ${s.rating === 1 ? "Fail" : ratingLabel(s.rating)}`;
-  return ` · set ${k}: ${what}${rate}`;
+  return `, set ${k} was ${what}${rate}`;
 }
 
 /** Render list: the hero's exercise as a full card, then the other open
@@ -1886,8 +1886,8 @@ useVisibilityRefresh(loadAll);
         <div class="eyebrow amber">Rest day recommended</div>
         <p class="hero-text">{{ recovery.rest_day_reason }}.</p>
         <p class="hint">
-          Recovery {{ Math.round(recovery.recovery_score ?? 0) }} ·
-          sleep {{ recovery.sleep_h?.toFixed(1) ?? '?' }}h ·
+          Recovery {{ Math.round(recovery.recovery_score ?? 0) }},
+          sleep {{ recovery.sleep_h?.toFixed(1) ?? '?' }}h,
           readiness {{ Math.round(recovery.readiness_score ?? 0) }}
         </p>
         <p class="hint">
@@ -1961,7 +1961,7 @@ useVisibilityRefresh(loadAll);
           <NeonStat :value="durationText" label="Duration" />
         </div>
         <p class="hint center">
-          {{ completedSetsCount }}/{{ totalSetsCount }} sets ·
+          {{ completedSetsCount }}/{{ totalSetsCount }} sets,
           {{ doneExercisesCount }}/{{ totalExercisesCount }} exercises
         </p>
       </NeonHero>
@@ -2000,7 +2000,7 @@ useVisibilityRefresh(loadAll);
       <NeonHero v-else-if="heroWex && heroSet != null && heroEntry" ref="nowHeroRef"
                 :accent="CYAN" class="hero now-hero">
         <div class="hero-top">
-          <div class="eyebrow cyan">Now · Exercise {{ heroPos }} of {{ heroOf }}</div>
+          <div class="eyebrow cyan">Exercise {{ heroPos }} of {{ heroOf }}</div>
           <select v-if="!isTimedExercise(heroWex)" v-model="heroEntry.setType"
                   class="type-sel" aria-label="Set type">
             <option value="working">work</option>
@@ -2169,7 +2169,7 @@ useVisibilityRefresh(loadAll);
           </NeonRing>
           <button class="pill ghost" @click="stopRest">{{ restDone ? 'Dismiss' : 'Skip rest' }}</button>
         </div>
-        <button class="btn-log lime" :disabled="busy === 'complete'" @click="requestComplete">
+        <button class="btn-ghost finish" :disabled="busy === 'complete'" @click="requestComplete">
           {{ busy === 'complete' ? 'Finishing…' : 'Finish workout' }}
         </button>
         <button class="btn-ghost wide" @click="openAdd"><Plus :size="15" /> Add exercise</button>
@@ -2181,13 +2181,13 @@ useVisibilityRefresh(loadAll);
                 :style="{ '--c': CYAN }" :aria-expanded="openChip === 'coach'" @click="toggleChip('coach')">
           <Sparkles :size="15" /> Coach
         </button>
-        <button v-if="fastingActive && workout.fasting_context" class="chip"
+        <button v-if="fastingActive && workout.fasting_context" class="chip amber"
                 :class="{ on: openChip === 'fast' }" :style="{ '--c': AMBER }"
                 :aria-expanded="openChip === 'fast'" @click="toggleChip('fast')">
           <Hourglass :size="15" /> {{ workout.fasting_context.current_hours.toFixed(0) }}h fasted
         </button>
         <button v-if="deloadActive" class="chip" :class="{ on: openChip === 'deload' }"
-                :style="{ '--c': AMBER }" :aria-expanded="openChip === 'deload'" @click="toggleChip('deload')">
+                :style="{ '--c': CYAN }" :aria-expanded="openChip === 'deload'" @click="toggleChip('deload')">
           <Feather :size="15" /> Load eased ~{{ deloadPct }}%
         </button>
         <button v-if="isPaused" class="chip" :class="{ on: openChip === 'paused' }"
@@ -2196,7 +2196,7 @@ useVisibilityRefresh(loadAll);
         </button>
         <button v-if="whyVisible" class="chip" :class="{ on: openChip === 'why' }"
                 :style="{ '--c': '#9b9bb0' }" :aria-expanded="openChip === 'why'" @click="toggleChip('why')">
-          <Info :size="15" /> Why this plan<template v-if="planNotes.length"> · {{ planNotes.length }}</template>
+          <Info :size="15" /> Why this plan<template v-if="planNotes.length"> ({{ planNotes.length }})</template>
         </button>
       </div>
 
@@ -2247,26 +2247,27 @@ useVisibilityRefresh(loadAll);
         <NeonEyebrow v-if="c.head">{{ c.head }}</NeonEyebrow>
 
         <!-- Up next: one compact line. Tap to make it the hero's exercise. -->
+        <!-- No coloured side bar here: the cyan bar marks the CURRENT row
+             only, and superset A hashed to the same cyan. The superset is
+             named in text instead, as on the phone. -->
         <button v-if="c.mode === 'next'" type="button" class="next-line"
-                :style="c.wex.superset_id ? { borderLeftColor: supersetColor(c.wex.superset_id) } : {}"
                 @click="focusExercise(c.wex)">
           <span class="nl-main">
             <span class="nl-name">{{ exPos(c.wex) }}. {{ exName(c.wex.exercise_id) }}</span>
-            <span class="nl-rx">{{ prescriptionShort(c.wex) }}</span>
+            <span class="nl-rx">{{ prescriptionShort(c.wex) }}<span v-if="c.wex.superset_id" class="nl-ss">, superset {{ c.wex.superset_id }}</span></span>
           </span>
-          <span class="nl-count">{{ accountedSets(c.wex) }}/{{ c.wex.target_sets }}</span>
+          <span v-if="accountedSets(c.wex) > 0" class="nl-count">{{ accountedSets(c.wex) }}/{{ c.wex.target_sets }}</span>
           <ChevronRight :size="16" class="nl-chev" />
         </button>
 
         <!-- The hero's exercise, collapsed: the hero carries its details, so
              the full card (set table, corrections) is one tap away. -->
-        <div v-else-if="c.mode === 'current'" class="sum-line current"
-             :style="c.wex.superset_id ? { borderLeftColor: supersetColor(c.wex.superset_id) } : {}">
+        <div v-else-if="c.mode === 'current'" class="sum-line current" aria-current="step">
           <button type="button" class="sum-main" :aria-expanded="false"
                   :aria-label="`Show all sets of ${exName(c.wex.exercise_id)}`"
                   @click="toggleExpanded(c.wex.id)">
             <span class="sum-name">{{ exPos(c.wex) }}. {{ exName(c.wex.exercise_id) }}</span>
-            <span class="sum-sets">{{ accountedSets(c.wex) }}/{{ c.wex.target_sets }} sets</span>
+            <span class="sum-sets now">{{ heroSet != null ? `Now, set ${heroSet} of ${c.wex.target_sets}` : "Now" }}</span>
             <ChevronDown :size="16" class="sum-chev" />
           </button>
         </div>
@@ -2313,8 +2314,8 @@ useVisibilityRefresh(loadAll);
               <div class="prescription">
                 {{ c.wex.target_sets }} × {{ repsRange(c.wex) }}{{ isTimedExercise(c.wex) ? 's' : '' }}
                 <span v-if="sideLabel(c.wex)" class="side-label"> {{ sideLabel(c.wex) }}</span>
-                <span v-if="c.wex.target_weight_lb"> @ {{ fmtLb(c.wex.target_weight_lb) }} lb</span>
-                <span class="rest"> · {{ c.wex.target_rest_s }}s rest</span>
+                <span v-if="c.wex.target_weight_lb"> at {{ fmtLb(c.wex.target_weight_lb) }} lb</span>
+                <span class="rest">, {{ c.wex.target_rest_s }}s rest</span>
               </div>
             </div>
             <div v-if="imageUrl(c.wex.exercise_id, 0)" class="thumb">
@@ -2451,7 +2452,7 @@ useVisibilityRefresh(loadAll);
       <!-- Complete (early) / Pause — the hero carries Finish once every
            set is accounted for, so this is the walk-away path (SKIP-1). -->
       <div v-if="sessionLive && workout.exercises.length && !allSetsDone" class="bottom">
-        <button class="btn-log lime" :disabled="busy === 'complete'" @click="requestComplete">
+        <button class="btn-ghost finish" :disabled="busy === 'complete'" @click="requestComplete">
           {{ busy === 'complete' ? 'Finishing…' : 'Complete workout' }}
         </button>
         <button v-if="completedSetsCount > 0" class="btn-ghost" :disabled="busy === 'pause'" @click="pauseWorkout">
@@ -2545,7 +2546,7 @@ useVisibilityRefresh(loadAll);
             <li v-for="alt in swapAlternatives" :key="alt.id">
               <button type="button" :disabled="swapBusy" @click="applySwap(alt.id)">
                 <strong>{{ alt.name }}</strong>
-                <span class="tags-line">{{ alt.movement_pattern.replace('_', ' ') }} · {{ alt.primary_muscle }}</span>
+                <span class="tags-line">{{ alt.movement_pattern.replace('_', ' ') }}, {{ alt.primary_muscle }}</span>
               </button>
             </li>
           </ul>
@@ -2574,7 +2575,7 @@ useVisibilityRefresh(loadAll);
             <li v-for="alt in addCandidates" :key="alt.id">
               <button type="button" :disabled="addBusy" @click="addExercise(alt.id)">
                 <strong>{{ alt.name }}</strong>
-                <span class="tags-line">{{ alt.movement_pattern.replace('_', ' ') }} · {{ alt.primary_muscle }}</span>
+                <span class="tags-line">{{ alt.movement_pattern.replace('_', ' ') }}, {{ alt.primary_muscle }}</span>
               </button>
             </li>
           </ul>
@@ -2722,7 +2723,7 @@ useVisibilityRefresh(loadAll);
 .segs { flex: 1; min-width: 0; display: flex; gap: 3px; }
 .seg { flex: 1; height: 8px; border-radius: 4px; background: var(--rn-track); overflow: hidden; }
 .seg i { display: block; height: 100%; border-radius: 4px; }
-.seg.done i { background: var(--rn-lime); box-shadow: 0 0 8px rgba(93, 255, 59, .45); }
+.seg.done i { background: var(--rn-lime); }
 .seg.partial i { background: var(--rn-cyan); }
 .seg.skipped i { background: rgba(155, 155, 176, .35); }
 .seg-label { font-family: 'Space Grotesk', monospace; font-size: 12px; font-weight: 700;
@@ -2730,8 +2731,15 @@ useVisibilityRefresh(loadAll);
 
 /* Hero */
 .hero-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.eyebrow { font-family: 'Space Grotesk', monospace; font-size: 11px; font-weight: 700; letter-spacing: .12em;
-  text-transform: uppercase; color: var(--rn-mut); min-width: 0; }
+/* Brief legend idiom: a 3px bar carries the colour, the label stays muted
+   sentence case. The tracked all-caps eyebrow coloured the words instead. */
+.eyebrow { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--rn-mut); min-width: 0; }
+.eyebrow::before { content: ""; flex: 0 0 3px; width: 3px; height: 16px; border-radius: 2px;
+  background: var(--rn-track); }
+.eyebrow.cyan, .eyebrow.lime, .eyebrow.amber { color: var(--rn-mut); }
+.eyebrow.cyan::before { background: var(--rn-cyan); }
+.eyebrow.lime::before { background: var(--rn-lime); }
+.eyebrow.amber::before { background: var(--rn-amber); }
 .now-name { margin: 6px 0 2px; font-size: 22px; font-weight: 800; letter-spacing: -.3px; line-height: 1.15;
   color: var(--rn-ink); overflow-wrap: anywhere; }
 .now-sub { font-size: 13px; color: var(--rn-mut); }
@@ -2744,9 +2752,9 @@ useVisibilityRefresh(loadAll);
 .now-pills { display: flex; align-items: center; gap: 10px; margin-top: 10px; min-width: 0; }
 .pills { display: flex; gap: 5px; flex: 0 1 150px; max-width: 150px; min-width: 40px; }
 .pills i { flex: 1 1 0; min-width: 0; height: 8px; border-radius: 4px; background: var(--rn-track); }
-.pills i.logged { background: var(--rn-lime); box-shadow: 0 0 6px rgba(93, 255, 59, .4); }
+.pills i.logged { background: var(--rn-lime); }
 .pills i.skipped { background: rgba(155, 155, 176, .35); }
-.pills i.now { background: var(--rn-cyan); box-shadow: 0 0 6px rgba(40, 230, 255, .4); }
+.pills i.now { background: var(--rn-cyan); }
 .pills-txt { flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--rn-mut); overflow-wrap: anywhere;
   font-variant-numeric: tabular-nums; }
 .now-info { margin-top: 8px; font-size: 12px; line-height: 1.4; color: var(--rn-mut); overflow-wrap: anywhere; }
@@ -2755,7 +2763,7 @@ useVisibilityRefresh(loadAll);
 .now-actions .act { flex: 1 1 0; justify-content: center; min-width: 0; }
 .now-hint { font-size: 12px; color: var(--rn-mut); margin-top: 3px; font-family: 'Space Grotesk', monospace; }
 .hero-text { margin: 8px 0; font-size: 14px; line-height: 1.45; color: var(--rn-ink); }
-.type-sel { background: var(--rn-card); color: var(--rn-mut); border: 1px solid var(--rn-line); border-radius: 8px;
+.type-sel { background: var(--rn-high); color: var(--rn-ink); border: 0; border-radius: 8px;
   font: inherit; font-size: 12px; padding: 4px 6px; min-height: 32px; }
 /* The NOW hero scrolls with the page (it used to be sticky at >=760px tall,
    which pinned most of the viewport). StrengthPinBar takes over once the
@@ -2784,27 +2792,30 @@ useVisibilityRefresh(loadAll);
 .stp button:disabled { color: var(--rn-mut); opacity: .45; cursor: default; }
 
 .ratings { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 10px; }
-.rate { min-height: 40px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
-  background: var(--rn-card); color: var(--c); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
-.rate.on { background: var(--c); color: var(--rn-onacc); border-color: var(--c); }
+/* The label always carries its rating colour so the scale reads before a
+   tap; the fill and outline are kept for the selected rating only, so the
+   screen does not show four coloured blocks for one decision. */
+.rate { min-height: 44px; border-radius: 12px; border: 1.5px solid transparent;
+  background: var(--rn-high); color: var(--c, var(--rn-ink)); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.rate.on { background: color-mix(in srgb, var(--c) 20%, transparent); color: var(--c); border-color: var(--c); }
 .btn-log { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 48px;
   margin-top: 10px; border: 0; border-radius: 14px; background: var(--rn-cyan); color: var(--rn-onacc);
-  font: inherit; font-size: 15px; font-weight: 800; cursor: pointer; box-shadow: 0 0 18px rgba(40, 230, 255, .28); }
-.btn-log.lime { background: var(--rn-lime); box-shadow: 0 0 18px rgba(93, 255, 59, .25); }
-.btn-log:disabled { opacity: .4; cursor: default; box-shadow: none; }
+  font: inherit; font-size: 15px; font-weight: 800; cursor: pointer; }
+.btn-log.lime { background: var(--rn-lime); }
+.btn-log:disabled { opacity: .4; cursor: default; }
 .btn-ghost { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px;
-  padding: 0 16px; border-radius: 14px; border: 1px solid var(--rn-track); background: var(--rn-card);
+  padding: 0 16px; border-radius: 14px; border: 0; background: var(--rn-high);
   color: var(--rn-ink); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
 .btn-ghost.wide { width: 100%; margin-top: 10px; }
 .btn-ghost:disabled { opacity: .5; }
 .btn-text { display: inline-flex; align-items: center; gap: 4px; min-height: 40px; padding: 0 10px; border: 0;
   background: transparent; color: var(--rn-cyan); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
 .btn-text:disabled { opacity: .5; }
-.pill { min-height: 36px; padding: 0 14px; border-radius: 18px; border: 1px solid var(--rn-cyan);
-  background: rgba(40, 230, 255, .12); color: var(--rn-cyan); font: inherit; font-size: 13px; font-weight: 700;
+.pill { min-height: 36px; padding: 0 14px; border-radius: 18px; border: 0;
+  background: var(--rn-high); color: var(--rn-ink); font: inherit; font-size: 13px; font-weight: 700;
   cursor: pointer; }
-.pill.ghost { border-color: var(--rn-track); background: transparent; color: var(--rn-ink); }
-.pill.warn { border-color: rgba(255, 181, 46, .5); background: rgba(255, 181, 46, .10); color: var(--rn-amber); }
+.pill.ghost { background: transparent; color: var(--rn-ink); }
+.pill.warn { background: rgba(255, 181, 46, .12); color: var(--rn-amber); }
 .pill:disabled { opacity: .5; }
 
 /* Rest ring inside the hero */
@@ -2813,7 +2824,7 @@ useVisibilityRefresh(loadAll);
 .ring-num { font-family: 'Space Grotesk', monospace; font-size: 20px; font-weight: 700;
   font-variant-numeric: tabular-nums; }
 .ring-num.sm { font-size: 15px; }
-.ring-cap { font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--rn-mut); }
+.ring-cap { font-size: 11px; color: var(--rn-mut); }
 .rest-body { flex: 1; min-width: 0; }
 .rest-state { font-size: 16px; font-weight: 800; }
 .rest-next { font-size: 13px; color: var(--rn-mut); margin-top: 2px; font-family: 'Space Grotesk', monospace; }
@@ -2827,22 +2838,26 @@ useVisibilityRefresh(loadAll);
 .chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 4px; margin-bottom: 8px;
   scrollbar-width: none; }
 .chips::-webkit-scrollbar { display: none; }
-.chip { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px;
-  border-radius: 17px; border: 1px solid color-mix(in srgb, var(--c) 40%, transparent);
-  background: color-mix(in srgb, var(--c) 10%, transparent); color: var(--c); font: inherit; font-size: 13px;
-  font-weight: 700; cursor: pointer; white-space: nowrap; }
-.chip.on { background: color-mix(in srgb, var(--c) 22%, transparent); border-color: var(--c); }
-.chip-panel { background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 16px; padding: 12px 14px;
+/* Neutral pills with a tinted icon. Amber (fasting) is the one real signal
+   and keeps its tint; the open chip gets a cyan underline-free ring. */
+.chip { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px;
+  border-radius: 18px; border: 1.5px solid transparent; background: var(--rn-high); color: var(--rn-ink);
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.chip :deep(svg) { color: var(--c); }
+.chip.amber { background: rgba(255, 181, 46, .12); color: var(--rn-amber); }
+.chip.on { border-color: var(--c); }
+.chip-panel { background: var(--rn-card); border: 0; border-radius: 16px; padding: 12px 14px;
   margin-bottom: 12px; font-size: 13px; line-height: 1.5; color: var(--rn-ink); overflow-wrap: anywhere; }
-.chip-panel.amber { border-color: rgba(255, 181, 46, .35); background: rgba(255, 181, 46, .06); }
+.chip-panel.amber { background: rgba(255, 181, 46, .08); }
 .chip-panel p { margin: 4px 0 8px; color: var(--rn-mut); }
 .chip-panel .meta { margin: 6px 0 0; font-size: 12px; }
 .pn-list { margin: 0; padding-left: 18px; color: var(--rn-mut); }
 .pn-list li { margin: 3px 0; }
 
 /* Up-next lines */
+.nl-ss { color: #ff3ad8; }
 .next-line { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 52px; margin-bottom: 6px;
-  padding: 8px 10px 8px 14px; border: 1px solid var(--rn-line); border-left: 3px solid var(--rn-track);
+  padding: 8px 10px 8px 14px; border: 0; border-left: 3px solid transparent;
   border-radius: 14px; background: var(--rn-card); color: var(--rn-ink); font: inherit; text-align: left;
   cursor: pointer; }
 .nl-name { flex: 1; min-width: 0; font-size: 14px; font-weight: 700; overflow: hidden; text-overflow: ellipsis;
@@ -2855,7 +2870,7 @@ useVisibilityRefresh(loadAll);
 
 /* Closed summary lines — darker than a card */
 .sum-line { display: flex; flex-wrap: wrap; align-items: center; min-height: 56px; margin-bottom: 6px;
-  padding: 0 6px 0 0; background: var(--dark); border: 1px solid var(--rn-line); border-radius: 14px; }
+  padding: 0 6px 0 0; background: var(--dark); border: 0; border-radius: 14px; }
 .sum-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 56px; padding: 0 12px;
   border: 0; background: transparent; color: var(--rn-ink); font: inherit; text-align: left; cursor: pointer; }
 .sum-main:disabled { cursor: default; }
@@ -2866,14 +2881,16 @@ useVisibilityRefresh(loadAll);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 48%; }
 .sum-chev { color: var(--rn-mut); flex: 0 0 auto; }
 .sum-line.muted .sum-name { color: var(--rn-mut); }
-.sum-line.current { border-color: rgba(40, 230, 255, .35); background: var(--rn-card); }
-.sum-line.current[style*="border-left-color"] { border-left-width: 3px; }
+/* "You are here" once the hero has scrolled away: the same cyan bar the
+   hero's "Exercise N of M" line carries, a lighter surface than the rows
+   around it, and the only cyan text in the list. */
+.sum-line.current { background: var(--rn-high); box-shadow: inset 3px 0 0 #28e6ff; }
+.sum-sets.now { color: #28e6ff; font-family: inherit; font-weight: 600; }
 .sum-line .card-err { flex-basis: 100%; padding: 0 12px 10px; }
 
 /* Full exercise card */
-.ex-card { background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 18px; padding: 14px;
+.ex-card { background: var(--rn-card); border: 0; border-radius: 20px; padding: 14px;
   margin-bottom: 10px; min-width: 0; }
-.ex-card.current { border-color: rgba(40, 230, 255, .35); }
 .ex-card[style*="border-left-color"] { border-left-width: 3px; }
 .ss-banner { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
 .ss-banner strong { color: var(--rn-ink); }
@@ -2881,7 +2898,7 @@ useVisibilityRefresh(loadAll);
 .ex-title { flex: 1; min-width: 0; }
 .ex-head h3 { margin: 0; font-size: 16px; font-weight: 800; color: var(--rn-ink); overflow-wrap: anywhere; }
 .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
-.tag { font-size: 9.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; padding: 2px 6px;
+.tag { font-size: 12px; font-weight: 600; padding: 2px 6px;
   border-radius: 6px; }
 .tag.cyan { background: rgba(40, 230, 255, .12); }
 .tag.amber { background: rgba(255, 181, 46, .12); }
@@ -2897,7 +2914,7 @@ useVisibilityRefresh(loadAll);
   font-family: 'Space Grotesk', monospace; }
 .ex-actions { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 6px; }
 .act { display: inline-flex; align-items: center; min-height: 40px; padding: 0 12px; border-radius: 12px;
-  border: 1px solid var(--rn-track); background: var(--rn-high); color: var(--rn-ink); font: inherit;
+  border: 0; background: var(--rn-high); color: var(--rn-ink); font: inherit;
   font-size: 13px; font-weight: 600; text-decoration: none; cursor: pointer; }
 .act:disabled { opacity: .5; }
 
@@ -2905,8 +2922,7 @@ useVisibilityRefresh(loadAll);
 .grid { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
 .g-head, .g-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) minmax(0, 1.3fr) 52px; gap: 6px;
   align-items: center; padding: 0 8px; }
-.g-head { font-family: 'Space Grotesk', monospace; font-size: 10.5px; font-weight: 700; letter-spacing: .1em;
-  text-transform: uppercase; color: var(--rn-mut); min-height: 22px; }
+.g-head { font-size: 12px; color: var(--rn-mut); min-height: 22px; }
 .g-row { min-height: 44px; border-radius: 10px; border: 1px solid transparent; font-family: 'Space Grotesk', monospace;
   font-size: 15px; font-weight: 700; color: var(--rn-ink); font-variant-numeric: tabular-nums; }
 .g-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2947,7 +2963,7 @@ useVisibilityRefresh(loadAll);
 .add-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
 
 /* Review */
-.panel { background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 18px; padding: 14px; }
+.panel { background: var(--rn-card); border: 0; border-radius: 20px; padding: 14px; }
 .review-card { border-radius: 14px; }
 .review-card h3 { margin: 0 0 6px; font-size: 15px; color: var(--rn-ink); }
 .review-card .hl { color: var(--rn-ink); padding-left: 18px; margin: 4px 0; font-size: 13px; }
@@ -2958,13 +2974,15 @@ useVisibilityRefresh(loadAll);
 
 /* Week strip */
 .week-strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
-.week-strip .day { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 7px 0;
-  border-radius: 10px; border: 1px solid var(--rn-line); background: var(--rn-card); text-decoration: none; min-width: 0; }
-.week-strip .dow { font-size: 10px; font-weight: 700; color: var(--rn-mut); white-space: nowrap; overflow: hidden;
+/* Flat cells: today is marked by a cyan label and underline, not a bordered
+   box — seven outlined cells were seven more cards. */
+.week-strip .day { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 8px 0;
+  border-radius: 10px; border: 0; background: transparent; text-decoration: none; min-width: 0; min-height: 44px; }
+.week-strip .dow { font-size: 12px; font-weight: 600; color: var(--rn-mut); white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; max-width: 100%; }
 .week-strip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--rn-track); }
-.week-strip .day.today { border-color: var(--rn-cyan); }
-.week-strip .day.today .dow { color: var(--rn-ink); }
+.week-strip .day.today .dow { color: var(--rn-cyan); }
+.week-strip .day.today::after { content: ""; width: 18px; height: 2px; border-radius: 1px; background: var(--rn-cyan); }
 .week-strip .day.completed .dot { background: var(--rn-lime); }
 .week-strip .day.in_progress .dot { background: var(--rn-amber); }
 .week-strip .day.skipped .dot { background: var(--rn-mut); }
@@ -2973,7 +2991,7 @@ useVisibilityRefresh(loadAll);
 
 /* Upcoming */
 .upcoming-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
-.up-card { background: var(--rn-card); border: 1px solid var(--rn-line); border-radius: 14px; padding: 10px 12px;
+.up-card { background: var(--rn-card); border: 0; border-radius: 14px; padding: 10px 12px;
   min-width: 0; }
 .up-head { display: flex; justify-content: space-between; gap: 6px; font-size: 13px; color: var(--rn-ink); }
 .up-head .focus { color: var(--rn-cyan); font-size: 12px; text-transform: capitalize; }
@@ -3031,4 +3049,7 @@ useVisibilityRefresh(loadAll);
   cursor: pointer; border: 1px solid var(--rn-track); background: var(--rn-card); color: var(--rn-ink); }
 .hold-btn.fail { color: var(--rn-bad); border-color: rgba(255, 93, 122, .5); background: rgba(255, 93, 122, .12); }
 .hold-btn.done { color: #0f1118; background: var(--rn-peri); border-color: var(--rn-peri); }
+/* Finishing early is secondary to logging the set, so it must not share
+   the primary button's weight or compete with it in colour. */
+.bottom .btn-ghost.finish { flex: 1; color: #28e6ff; }
 </style>

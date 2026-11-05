@@ -60,6 +60,8 @@ import app.myvitals.sync.EquipmentPayload
 import app.myvitals.sync.StrengthExerciseInfo
 import app.myvitals.ui.MV
 import app.myvitals.ui.neon.NeonMV
+import app.myvitals.ui.neon.NeonNumberFamily
+import androidx.compose.ui.draw.alpha
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -90,10 +92,10 @@ fun StrengthCatalogScreen(
     val good        = if (neon) NeonMV.Lime    else MV.Green
     val favColor    = if (neon) NeonMV.Amber   else MV.Amber
     val badColor    = if (neon) NeonMV.Bad     else MV.Red
-    // Exercise tag / muscle / icon tint — violet silhouettes become cyan
-    // under neon to cohere with the heart/info accent family.
-    val iconTint    = if (neon) NeonMV.Cyan    else Color(0xFFA78BFA)
-    val iconTintBg  = if (neon) NeonMV.Cyan.copy(alpha = 0.08f) else Color(0x14A78BFA)
+    // Exercise / muscle icon tint. Under neon these are labels, not data, so
+    // they render as quiet ink on a neutral tile rather than in an accent.
+    val iconTint    = if (neon) Color(0xFFC9C9DA) else Color(0xFFA78BFA)
+    val iconTintBg  = if (neon) NeonMV.CardHigh else Color(0x14A78BFA)
 
     var catalog by remember { mutableStateOf<List<StrengthExerciseInfo>>(emptyList()) }
     var equipment by remember { mutableStateOf<EquipmentPayload?>(null) }
@@ -287,8 +289,9 @@ fun StrengthCatalogScreen(
             )
         }
         Text(
-            "⭐ favorite · 👎 avoid · 🚫 disabled · tap to toggle",
-            color = dim, fontSize = 11.sp,
+            if (neon) "Tap the star to favourite, the thumb to avoid, the block to disable."
+            else "⭐ favorite · 👎 avoid · 🚫 disabled · tap to toggle",
+            color = dim, fontSize = if (neon) 12.sp else 11.sp,
             modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
         )
 
@@ -310,6 +313,15 @@ fun StrengthCatalogScreen(
             textStyle = androidx.compose.ui.text.TextStyle(
                 color = ink, fontSize = 14.sp,
             ),
+            // Neon: a flat field on the card surface; only focus draws a line.
+            shape = RoundedCornerShape(if (neon) 14.dp else 4.dp),
+            colors = if (neon) androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = NeonMV.Cyan,
+                unfocusedBorderColor = Color.Transparent,
+                focusedContainerColor = card,
+                unfocusedContainerColor = card,
+                cursorColor = NeonMV.Cyan,
+            ) else androidx.compose.material3.OutlinedTextFieldDefaults.colors(),
         )
 
         // Category filter chips (Yoga / Bodyweight only / Dumbbell / Bench
@@ -334,18 +346,24 @@ fun StrengthCatalogScreen(
                 Box(
                     Modifier
                         .clip(RoundedCornerShape(50))
-                        .background(if (on) accent.copy(alpha = 0.18f) else card)
-                        .border(1.dp,
-                            if (on) accent.copy(alpha = 0.5f) else outline,
+                        .background(if (on) accent.copy(alpha = if (neon) 0.14f else 0.18f) else card)
+                        // Neon: flat chips, the selected one is cyan text on
+                        // a low-alpha cyan fill. No outline either way.
+                        .border(if (neon) 0.dp else 1.dp,
+                            if (neon) Color.Transparent
+                            else if (on) accent.copy(alpha = 0.5f) else outline,
                             RoundedCornerShape(50))
                         .clickable {
                             activeCategories[key] = !(activeCategories[key] ?: false)
                         }
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                        .padding(
+                            horizontal = if (neon) 12.dp else 10.dp,
+                            vertical = if (neon) 6.dp else 4.dp,
+                        ),
                 ) {
                     Text(label,
                         color = if (on) accent else muted,
-                        fontSize = 11.sp)
+                        fontSize = if (neon) 12.sp else 11.sp)
                 }
             }
         }
@@ -353,10 +371,7 @@ fun StrengthCatalogScreen(
         // Muscle-group dropdown (single-select).
         var muscleMenuOpen by remember { mutableStateOf(false) }
         Box(modifier = Modifier.padding(bottom = 8.dp)) {
-            androidx.compose.material3.OutlinedButton(
-                onClick = { muscleMenuOpen = true },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
+            CatalogSelectButton(neon = neon, onClick = { muscleMenuOpen = true }) {
                 Text(
                     if (muscleFilter.isEmpty()) "All muscle groups"
                     else if (muscleFilter == "flexibility") "yoga / mobility"
@@ -394,10 +409,7 @@ fun StrengthCatalogScreen(
             "volume"     to "Sort: total volume",
         )
         Box(modifier = Modifier.padding(bottom = 8.dp)) {
-            androidx.compose.material3.OutlinedButton(
-                onClick = { sortMenuOpen = true },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
+            CatalogSelectButton(neon = neon, onClick = { sortMenuOpen = true }) {
                 Text(
                     sortLabels.firstOrNull { it.first == sortBy }?.second
                         ?: "Sort: A-Z by muscle",
@@ -430,13 +442,17 @@ fun StrengthCatalogScreen(
             )
             else -> LazyColumn(
                 contentPadding = PaddingValues(bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(if (neon) 8.dp else 4.dp),
             ) {
                 items(visible, key = { it.id }) { ex ->
                     val pref = prefs[ex.id]
                     Card(
+                        // Neon: every row is the same flat card; the user's
+                        // preference shows as a 3dp bar inside the row and
+                        // the lit action icon, not as a coloured outline.
+                        shape = RoundedCornerShape(if (neon) 16.dp else 12.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = when (pref) {
+                            containerColor = if (neon) card else when (pref) {
                                 "favorite" -> cardHigh
                                 "disabled" -> cardLow
                                 else -> card
@@ -444,15 +460,20 @@ fun StrengthCatalogScreen(
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(
-                                width = if (pref != null) 2.dp else 0.dp,
-                                color = when (pref) {
-                                    "favorite" -> favColor
-                                    "disabled" -> badColor
-                                    "avoid" -> muted
-                                    else -> Color.Transparent
-                                },
-                                shape = RoundedCornerShape(12.dp),
+                            .then(if (neon && pref == "disabled") Modifier.alpha(0.6f) else Modifier)
+                            // Only attach the border when it is wanted: Compose
+                            // draws border(0.dp) as a 1px hairline, not as none,
+                            // which left an amber outline on neon favourites.
+                            .then(
+                                if (pref != null && !neon) Modifier.border(
+                                    width = 2.dp,
+                                    color = when (pref) {
+                                        "favorite" -> favColor
+                                        "disabled" -> badColor
+                                        else -> muted
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                ) else Modifier,
                             )
                             .clickable {
                                 detailEx = ex
@@ -476,6 +497,21 @@ fun StrengthCatalogScreen(
                             modifier = Modifier.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            if (neon && pref != null) {
+                                Box(
+                                    Modifier
+                                        .size(width = 3.dp, height = 30.dp)
+                                        .background(
+                                            when (pref) {
+                                                "favorite" -> favColor
+                                                "disabled" -> badColor
+                                                else -> muted
+                                            },
+                                            RoundedCornerShape(2.dp),
+                                        ),
+                                )
+                                Spacer(Modifier.width(9.dp))
+                            }
                             // Thumbnail: prefer Noun Project image_front
                             // (tinted violet), fall back to hand-drawn yoga
                             // silhouette for mobility entries. Use the
@@ -529,6 +565,17 @@ fun StrengthCatalogScreen(
                                         fontWeight = FontWeight.SemiBold,
                                         modifier = Modifier.weight(1f, fill = false))
                                     val count = statsSummary[ex.id]?.timesPerformed ?: 0
+                                    if (neon) {
+                                        // A count, not a verdict: plain numeral.
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            if (count > 0) "${count}×" else "never",
+                                            color = if (count > 0) muted else muted.copy(alpha = 0.6f),
+                                            fontSize = 12.sp,
+                                            fontFamily = NeonNumberFamily,
+                                            fontWeight = FontWeight.Medium,
+                                        )
+                                    } else {
                                     val pillBg = if (count > 0)
                                         (if (neon) NeonMV.Lime.copy(alpha = 0.18f) else Color(0x2D22C55E))
                                         else (if (neon) NeonMV.Muted.copy(alpha = 0.15f) else Color(0x26B0BEC5))
@@ -547,6 +594,7 @@ fun StrengthCatalogScreen(
                                             fontWeight = FontWeight.SemiBold,
                                         )
                                     }
+                                    }
                                 }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     val musclePath = muscleIconPath(ex.primaryMuscle)
@@ -559,11 +607,12 @@ fun StrengthCatalogScreen(
                                         )
                                         Spacer(Modifier.width(3.dp))
                                     }
+                                    val sep = if (neon) ", " else " · "
                                     Text(
-                                        "${ex.movementPattern.replace('_', ' ')} · " +
-                                          "${muscleIconLabel(ex.primaryMuscle).ifEmpty { ex.primaryMuscle }} · " +
+                                        "${ex.movementPattern.replace('_', ' ')}$sep" +
+                                          "${muscleIconLabel(ex.primaryMuscle).ifEmpty { ex.primaryMuscle }}$sep" +
                                           ex.level,
-                                        color = muted, fontSize = 11.sp,
+                                        color = muted, fontSize = if (neon) 12.sp else 11.sp,
                                     )
                                 }
                             }
@@ -646,7 +695,8 @@ fun StrengthCatalogScreen(
                 Text(ex.name, color = ink, fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold)
                 Text(
-                    "${ex.movementPattern.replace('_', ' ')} · ${ex.equipment.joinToString(" + ")} · ${ex.level}",
+                    if (neon) "${ex.movementPattern.replace('_', ' ')}, ${ex.equipment.joinToString(" + ")}, ${ex.level}"
+                    else "${ex.movementPattern.replace('_', ' ')} · ${ex.equipment.joinToString(" + ")} · ${ex.level}",
                     color = muted, fontSize = 12.sp,
                     modifier = Modifier.padding(top = 2.dp),
                 )
@@ -687,9 +737,7 @@ fun StrengthCatalogScreen(
                 }
 
                 Spacer(Modifier.height(16.dp))
-                Text("YOUR HISTORY", color = muted,
-                    fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.5.sp)
+                SheetHeading("Your history", neon, muted)
                 Spacer(Modifier.height(6.dp))
                 when {
                     detailStatsLoading -> Text("Loading…",
@@ -705,7 +753,9 @@ fun StrengthCatalogScreen(
                                 Text(label, color = muted,
                                     fontSize = 12.sp, modifier = Modifier.weight(1f))
                                 Text(value, color = ink,
-                                    fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                    fontSize = if (neon) 13.sp else 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    fontFamily = if (neon) NeonNumberFamily else null)
                             }
                         }
                         statRow("Sessions", "${s.timesPerformed}")
@@ -722,9 +772,7 @@ fun StrengthCatalogScreen(
 
                 if (ex.instructions.isNotEmpty()) {
                     Spacer(Modifier.height(16.dp))
-                    Text("HOW TO DO IT", color = muted,
-                        fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.5.sp)
+                    SheetHeading("How to do it", neon, muted)
                     Spacer(Modifier.height(6.dp))
                     for ((i, line) in ex.instructions.withIndex()) {
                         Row(Modifier.padding(vertical = 3.dp)) {
@@ -738,6 +786,46 @@ fun StrengthCatalogScreen(
                 Spacer(Modifier.height(20.dp))
             }
         }
+    }
+}
+
+/** Section heading inside the detail sheet. Neon: sentence case, 17sp ink,
+ *  no tracked micro-label. Classic keeps the original caps label. */
+@Composable
+private fun SheetHeading(text: String, neon: Boolean, muted: Color) {
+    if (neon) {
+        Text(text, color = NeonMV.Ink, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+    } else {
+        Text(text.uppercase(), color = muted,
+            fontSize = 10.sp, fontWeight = FontWeight.Bold,
+            letterSpacing = 1.5.sp)
+    }
+}
+
+/** The muscle / sort pickers. Neon: a flat card-surface button with no
+ *  outline; classic keeps the Material outlined button. */
+@Composable
+private fun CatalogSelectButton(
+    neon: Boolean,
+    onClick: () -> Unit,
+    content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
+) {
+    if (neon) {
+        androidx.compose.material3.Button(
+            onClick = onClick,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                containerColor = NeonMV.Card, contentColor = NeonMV.Ink,
+            ),
+            content = content,
+        )
+    } else {
+        androidx.compose.material3.OutlinedButton(
+            onClick = onClick,
+            modifier = Modifier.fillMaxWidth(),
+            content = content,
+        )
     }
 }
 

@@ -148,4 +148,13 @@ html[data-theme="neon"] .st-under     { color: #ffb52e; border-left-color: #ffb5
 html[data-theme="neon"] .st-in_range  { color: #5dff3b; }
 html[data-theme="neon"] .st-over      { color: #ff5d7a; border-left-color: #ff5d7a; }
 html[data-theme="neon"] .muted { color: #9b9bb0; }
+/* Brief language: the colour of the bar and the status word carry the
+   verdict, so the row needs no coloured rail and the word needs no caps. */
+html[data-theme="neon"] .mv-row { border: 0; border-radius: 14px; }
+html[data-theme="neon"] .st-under,
+html[data-theme="neon"] .st-over { border-left: 0; }
+html[data-theme="neon"] .mv-tag {
+  text-transform: none; letter-spacing: 0; font-size: .75rem; opacity: 1;
+}
+html[data-theme="neon"] .mv-tag::first-letter { text-transform: uppercase; }
 </style>

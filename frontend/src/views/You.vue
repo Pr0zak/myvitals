@@ -6,7 +6,7 @@
  *   hero    habits: the active fast as a ring (elapsed of target, stage,
  *           when it ends) beside the sober count
  *   goals   up to three small rings, coloured by the SERVER's state_tone
- *   grid    Journal · Coach · Meals · Sober · Fasting · Settings
+ *   grid    Journal, Coach, Meals, Sober, Fasting, Settings
  *
  * Failure is not absence (UX-F2). Every request is settled separately and
  * a section only makes a claim about the user — "Not fasting", "No active
@@ -19,9 +19,7 @@ import { useRouter } from "vue-router";
 import { api, type FastingSessionOut } from "@/api/client";
 import { goalTone, goalStateNote } from "@/goalState";
 import NeonPage from "@/components/neon/NeonPage.vue";
-import NeonHero from "@/components/neon/NeonHero.vue";
 import NeonRing from "@/components/neon/NeonRing.vue";
-import NeonEyebrow from "@/components/neon/NeonEyebrow.vue";
 import {
   Brain, ChefHat, Hourglass, Package, PencilLine, Salad, Settings, Timer, UtensilsCrossed,
 } from "lucide-vue-next";
@@ -104,7 +102,10 @@ const profileLine = computed<string | null>(() => {
     parts.push(`${Math.floor(inches / 12)}'${inches % 12}"`);
   }
   if (p.activity_level) parts.push(p.activity_level.replace(/_/g, " "));
-  return parts.length ? parts.join(" · ") : "Add your details in Settings";
+  // A sentence, not a " · " string: "41 yrs, male, 5'11", moderately active".
+  if (!parts.length) return "Add your details in Settings";
+  const line = parts.map((x, i) => (i ? x.toLowerCase() : x)).join(", ");
+  return line[0].toUpperCase() + line.slice(1);
 });
 
 // ── Fasting ─────────────────────────────────────────────────────────────
@@ -222,51 +223,51 @@ function go(path: string): void {
     </template>
 
     <template v-else>
-      <NeonHero accent="#28e6ff">
-        <div class="habits">
-          <button class="half" aria-label="Fasting detail" @click="go('/fasting')">
-            <span class="eyebrow cyan">Fasting</span>
-            <NeonRing :fraction="fastFrac" color="#28e6ff" :size="112" :stroke="9" :ticks="fastTicks">
-              <template v-if="activeFast">
-                <!-- "14.3h" over "OF 16H" — never "14:16", which reads as a clock. -->
-                <div class="rv">{{ activeFast.elapsed_h.toFixed(1) }}h</div>
-                <div class="rc">{{ activeFast.target_hours != null ? `of ${trim(activeFast.target_hours)}h` : "no target" }}</div>
-              </template>
-              <div v-else class="rv mut">—</div>
-            </NeonRing>
+      <!-- Hero on the page ground, in the Today brief's language: two
+           blocks side by side, separated by space rather than a card. -->
+      <section class="habits">
+        <button class="half" aria-label="Fasting detail" @click="go('/fasting')">
+          <span class="lab"><span class="bar cyanbg" />Fasting</span>
+          <NeonRing :fraction="fastFrac" color="#28e6ff" :size="140" :stroke="12" :ticks="fastTicks">
             <template v-if="activeFast">
-              <span class="stage">{{ stageLabel }}</span>
-              <span v-if="fastEnds" class="small">{{ fastEnds }}</span>
+              <!-- "14.3h" over "of 16h" — never "14:16", which reads as a clock. -->
+              <div class="rv">{{ activeFast.elapsed_h.toFixed(1) }}h</div>
+              <div class="rc">{{ activeFast.target_hours != null ? `of ${trim(activeFast.target_hours)}h` : "no target" }}</div>
             </template>
-            <!-- Only a SUCCESSFUL "no active fast" may say this. -->
-            <span v-else-if="fasting === null || (fasting && !fasting.is_active)" class="cta cyan">Not fasting · Start</span>
-            <span v-else class="small">Couldn't load</span>
-          </button>
-          <div class="divider"></div>
-          <button class="half" aria-label="Sober detail" @click="go('/sober')">
-            <span class="eyebrow mag">Sober</span>
+            <div v-else class="rv mut">—</div>
+          </NeonRing>
+          <template v-if="activeFast">
+            <span class="stage">{{ stageLabel }}</span>
+            <span v-if="fastEnds" class="small">{{ fastEnds[0].toUpperCase() + fastEnds.slice(1) }}</span>
+          </template>
+          <!-- Only a SUCCESSFUL "no active fast" may say this. -->
+          <template v-else-if="fasting === null || (fasting && !fasting.is_active)">
+            <span class="small">Not fasting</span>
+            <span class="pill">Start a fast</span>
+          </template>
+          <span v-else class="small">Couldn't load</span>
+        </button>
+        <button class="half" aria-label="Sober detail" @click="go('/sober')">
+          <span class="lab"><span class="bar magbg" />Sober</span>
+          <span class="bigbox">
             <template v-if="soberDays != null">
-              <!-- Magenta always: the count is never a warning colour, and a
-                   reset is never one either. -->
-              <b class="big mag">{{ soberDays }}</b>
-              <span class="small">{{ soberDays === 1 ? "day" : "days" }}</span>
-              <span v-if="soberSince" class="small since">{{ soberSince }}</span>
+              <!-- Ink, not a warning colour: the count is never a warning,
+                   and a reset is never one either. The magenta bar carries
+                   the identity. -->
+              <b class="big">{{ soberDays }}</b>
+              <span class="unit">{{ soberDays === 1 ? "day" : "days" }}</span>
             </template>
-            <template v-else-if="sober">
-              <b class="big mut">—</b>
-              <span class="cta">Start counting</span>
-            </template>
-            <template v-else>
-              <b class="big mut">—</b>
-              <span class="small">Couldn't load</span>
-            </template>
-          </button>
-        </div>
-      </NeonHero>
+            <b v-else class="big mut">—</b>
+          </span>
+          <span v-if="soberDays != null && soberSince" class="small">{{ soberSince[0].toUpperCase() + soberSince.slice(1) }}</span>
+          <span v-else-if="soberDays == null && sober" class="pill">Start counting</span>
+          <span v-else-if="soberDays == null" class="small">Couldn't load</span>
+        </button>
+      </section>
 
       <div class="ghead">
-        <NeonEyebrow>Goals</NeonEyebrow>
-        <button class="gall" @click="go('/goals')">All ›</button>
+        <h2 class="sect">Goals</h2>
+        <button class="gall" @click="go('/goals')">See all goals</button>
       </div>
       <p v-if="goals === undefined" class="note">Couldn't load goals</p>
       <p v-else-if="!goals.length" class="note">No active goals yet</p>
@@ -284,10 +285,10 @@ function go(path: string): void {
       </div>
     </template>
 
-    <NeonEyebrow>More</NeonEyebrow>
+    <h2 class="sect">More</h2>
     <div class="tiles">
       <button v-for="t in TILES" :key="t.to" class="tile" @click="go(t.to)">
-        <span class="ti" :style="{ color: t.tint, background: `color-mix(in srgb, ${t.tint} 14%, transparent)` }">
+        <span class="ti" :style="{ color: t.tint }">
           <component :is="t.icon" :size="19" />
         </span>
         <span>{{ t.label }}</span>
@@ -303,46 +304,54 @@ function go(path: string): void {
 
 <style scoped>
 .date { color: #9b9bb0; font-weight: 600; font-size: 14px; }
-.sub { margin: -12px 0 14px; font-size: 12px; color: #9b9bb0; white-space: nowrap; overflow: hidden;
+.sub { margin: -12px 0 18px; font-size: 13px; color: rgba(236, 236, 245, .85); white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; }
-.cyan { color: #28e6ff; } .mag { color: #ff3ad8; } .mut { color: #9b9bb0; }
+.mut { color: #9b9bb0; }
 
-.habits { display: flex; align-items: stretch; }
-.half { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 6px;
-  background: none; border: 0; padding: 0; cursor: pointer; color: inherit; font: inherit; text-align: center; }
-.divider { width: 1px; background: #23263a; margin: 6px 12px; }
-.eyebrow { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-size: 11px; font-weight: 700;
-  letter-spacing: .1em; text-transform: uppercase; margin-bottom: 2px; }
-.rv { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 700; font-size: 22px; color: #ececf5; }
-.rc { font-size: 9px; font-weight: 700; letter-spacing: .12em; color: #9b9bb0; text-transform: uppercase; }
-.stage { font-size: 13px; font-weight: 700; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.small { font-size: 11px; color: #9b9bb0; }
-.since { margin-top: 6px; }
-.cta { font-size: 12px; font-weight: 600; }
-.big { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 700; font-size: 44px; line-height: 1;
-  margin-top: 14px; font-variant-numeric: tabular-nums; }
+.habits { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; margin: 4px 0 26px;
+  max-width: 640px; }
+.half { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  background: none; border: 0; padding: 0; cursor: pointer; color: inherit; font: inherit; text-align: left;
+  border-radius: 12px; }
+.half:focus-visible, .tile:focus-visible, .mlink:focus-visible { outline: 2px solid #28e6ff; outline-offset: 3px; }
+.lab { display: inline-flex; align-items: center; gap: 8px; font-size: .75rem; color: #9b9bb0; }
+.bar { width: 3px; height: 14px; border-radius: 2px; }
+.cyanbg { background: #28e6ff; } .magbg { background: #ff3ad8; }
+.rv { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 500; font-size: 1.7rem;
+  letter-spacing: -.5px; color: #ececf5; font-variant-numeric: tabular-nums; text-align: center; }
+.rc { font-size: .7rem; color: #9b9bb0; text-align: center; }
+.stage { font-size: .9rem; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.small { font-size: .72rem; color: #9b9bb0; }
+.bigbox { display: flex; align-items: baseline; gap: 6px; height: 140px; padding-top: 30px; }
+.big { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 500; font-size: 3.6rem; line-height: 1;
+  letter-spacing: -2px; color: #ececf5; font-variant-numeric: tabular-nums; }
+.unit { font-size: .9rem; color: #9b9bb0; }
+.pill { display: inline-block; background: #28e6ff; color: #06121a; font-size: .78rem; font-weight: 600;
+  padding: 6px 14px; border-radius: 999px; }
 
+.sect { font-size: 1.1rem; font-weight: 500; color: #ececf5; margin: 0 0 10px; letter-spacing: -.1px; }
 .ghead { display: flex; align-items: baseline; justify-content: space-between; }
-.gall { font-size: 11px; font-weight: 700; color: #28e6ff; background: none; border: 0; padding: 0; cursor: pointer; }
+.gall { font-size: .78rem; font-weight: 500; color: #28e6ff; background: none; border: 0; padding: 0; cursor: pointer; }
 .note { color: #9b9bb0; font-size: 13px; margin: 0 0 4px; }
-.goals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.goals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 26px; }
 .goal { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px;
-  background: #181b27; border: 1px solid #23263a; border-radius: 18px; padding: 12px 8px; }
-.gp { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 700; font-size: 16px; }
-.gt { font-size: 12px; font-weight: 700; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2;
+  background: #181b27; border-radius: 20px; padding: 14px 8px; }
+.gp { font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 500; font-size: 16px; }
+.gt { font-size: 12px; font-weight: 600; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2;
   -webkit-box-orient: vertical; overflow: hidden; }
 .gn { font-size: 10.5px; color: #9b9bb0; line-height: 1.25; }
 .gn.away { color: #ffb52e; }
 
 .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.tile { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 4px;
-  background: #181b27; border: 1px solid #23263a; border-radius: 18px; cursor: pointer; color: #ececf5;
-  font: inherit; font-size: 13px; font-weight: 600; }
+.tile { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px 4px;
+  background: #181b27; border: 0; border-radius: 20px; cursor: pointer; color: #ececf5;
+  font: inherit; font-size: 13px; font-weight: 500; }
 .tile:active { transform: scale(.97); }
-.ti { width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+.ti { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; }
 .mlinks { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .mlink { display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 12px; color: #9b9bb0;
-  background: #181b27; border: 1px solid #23263a; border-radius: 999px; padding: 6px 12px; cursor: pointer; }
+  background: #181b27; border: 0; border-radius: 999px; padding: 7px 12px; cursor: pointer; }
 
 .errbar { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; cursor: pointer;
   background: rgba(255, 93, 122, .10); border: 1px solid rgba(255, 93, 122, .28); border-radius: 14px;

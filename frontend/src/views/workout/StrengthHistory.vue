@@ -155,8 +155,10 @@ const calendarOption = computed(() => {
       ? [`${y}-01-01`, toLocalISO(new Date())]
       : y,
     itemStyle: {
-      color: neon ? "#181b27" : "#1a2332",
-      borderColor: neon ? "rgba(39, 42, 59, 0.9)" : "rgba(148, 163, 184, 0.12)",
+      // Neon: empty days are track-coloured squares on the flat card, with
+      // the card colour as the gap — the card has no border to sit inside.
+      color: neon ? "#272a3b" : "#1a2332",
+      borderColor: neon ? "#181b27" : "rgba(148, 163, 184, 0.12)",
       borderWidth: 1,
     },
     splitLine: { show: false },
@@ -259,7 +261,7 @@ const calendarHeight = computed(() => {
       </Card>
 
       <div v-for="[ym, group] in grouped" :key="ym" class="group">
-        <h2>{{ new Date(`${ym}-01`).toLocaleString(undefined, { month: 'long', year: 'numeric' }) }}</h2>
+        <h2>{{ new Date(`${ym}-01T12:00:00`).toLocaleString(undefined, { month: 'long', year: 'numeric' }) }}</h2>
         <ul class="list">
           <li v-for="it in group" :key="it.id" :class="`status-${it.status}`" @click="showDetail(it.id)">
             <div class="date">
@@ -283,7 +285,7 @@ const calendarHeight = computed(() => {
         <header>
           <h2 v-if="detail">
             {{ new Date(detail.date).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }) }}
-            <small>· {{ detail.split_focus }}</small>
+            <small>, {{ detail.split_focus }}</small>
           </h2>
           <h2 v-else>Loading…</h2>
           <button class="close" @click="closeDetail">✕</button>
@@ -418,23 +420,37 @@ html[data-theme="neon"] .strength-history {
   font-family: 'Plus Jakarta Sans', 'Geist', system-ui; color: var(--rn-ink);
 }
 html[data-theme="neon"] .strength-history h1 { color: var(--rn-ink); }
-html[data-theme="neon"] .strength-history h2 { color: var(--rn-mut); }
+/* Sentence-case section headings, not tracked ALL-CAPS eyebrows. */
+html[data-theme="neon"] .strength-history h2 {
+  color: var(--rn-ink); text-transform: none; letter-spacing: 0;
+  font-size: 17px; font-weight: 500;
+}
 html[data-theme="neon"] .strength-history .hint { color: var(--rn-mut); }
 html[data-theme="neon"] .strength-history .err { color: var(--rn-red); }
 
-/* Session rows — obsidian cards with faint neon edge, cyan on hover */
+/* Session rows — flat cards. Status is a 3px bar on the left edge plus a
+   coloured word; the old status-tinted outline was louder than the dates. */
 html[data-theme="neon"] .strength-history .list li {
-  background: var(--rn-card); border-color: #21243450; border-radius: 14px;
+  --st: var(--rn-mut);
+  background: var(--rn-card); border: 0; border-radius: 20px;
+  padding: 0.85rem 1rem 0.85rem 1.25rem; position: relative;
 }
-html[data-theme="neon"] .strength-history .list li:hover {
-  border-color: rgba(40, 230, 255, 0.45);
+html[data-theme="neon"] .strength-history .list li::before {
+  content: ""; position: absolute; left: 0.75rem; top: 0.85rem; bottom: 0.85rem;
+  width: 3px; border-radius: 2px; background: var(--st);
 }
-html[data-theme="neon"] .strength-history .list li.status-in_progress {
-  border-color: rgba(40, 230, 255, 0.55);
-}
+html[data-theme="neon"] .strength-history .list li.status-completed { --st: var(--rn-lime); }
+html[data-theme="neon"] .strength-history .list li.status-in_progress { --st: var(--rn-cyan); }
+html[data-theme="neon"] .strength-history .list li.status-skipped { --st: var(--rn-amber); }
+html[data-theme="neon"] .strength-history .list li:hover { background: #1e2230; }
+html[data-theme="neon"] .strength-history .list li:focus-visible { outline: 2px solid var(--rn-cyan); }
+html[data-theme="neon"] .strength-history .date { padding-left: 0.5rem; }
 html[data-theme="neon"] .strength-history .date strong {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace;
-  letter-spacing: -0.3px; color: var(--rn-ink);
+  font-weight: 500; color: var(--rn-ink);
+}
+html[data-theme="neon"] .strength-history .date .status,
+html[data-theme="neon"] .strength-history .ctx .status {
+  text-transform: capitalize; letter-spacing: 0; font-size: 0.8rem; font-weight: 500;
 }
 html[data-theme="neon"] .strength-history .meta { color: var(--rn-mut); }
 
@@ -449,17 +465,27 @@ html[data-theme="neon"] .strength-history .ctx .status.status-skipped { color: v
 html[data-theme="neon"] .strength-history .list li.status-planned .status,
 html[data-theme="neon"] .strength-history .ctx .status.status-planned { color: var(--rn-mut); }
 
+/* Flat cards (calendar, muscle volume) with sentence-case titles. Card.vue
+   is shared, so the override is scoped to this page under neon. */
+html[data-theme="neon"] .strength-history :deep(.card) {
+  background: var(--rn-card); border: 0; border-radius: 20px;
+}
+html[data-theme="neon"] .strength-history :deep(.card h2) {
+  text-transform: none; letter-spacing: 0; font-size: 15px;
+  font-weight: 500; color: var(--rn-ink);
+}
+
 /* Detail drawer → obsidian surfaces */
 html[data-theme="neon"] .strength-history .drawer {
   background: var(--rn-bg);
-  border-left-color: rgba(40, 230, 255, 0.18);
+  border-left-color: #21243450;
 }
 html[data-theme="neon"] .strength-history .drawer header h2 { color: var(--rn-ink); }
 html[data-theme="neon"] .strength-history .drawer header h2 small { color: var(--rn-mut); }
 html[data-theme="neon"] .strength-history .close { color: var(--rn-mut); }
 html[data-theme="neon"] .strength-history .ctx { color: var(--rn-mut); }
 html[data-theme="neon"] .strength-history .ctx .status {
-  background: var(--rn-card); border-color: #21243450;
+  background: none; border: 0; padding: 0;
 }
 html[data-theme="neon"] .strength-history .ctx .metric {
   font-family: 'Space Grotesk', 'Geist Mono', monospace; color: var(--rn-ink);
@@ -474,6 +500,7 @@ html[data-theme="neon"] .strength-history .sets {
 }
 html[data-theme="neon"] .strength-history .sets thead th {
   color: var(--rn-mut); border-bottom-color: #21243450;
+  text-transform: none; letter-spacing: 0;
 }
 html[data-theme="neon"] .strength-history .unit { color: var(--rn-mut); }
 

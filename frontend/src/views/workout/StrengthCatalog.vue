@@ -340,7 +340,7 @@ onMounted(load);
                 @click="toggleCategory(c.key)">{{ c.label }}</button>
         <button v-if="activeCategories.size > 0"
                 class="cat-chip clear" @click="activeCategories = new Set()">
-          clear
+          Clear
         </button>
       </div>
       <select v-model="muscleFilter" class="muscle-select">
@@ -365,21 +365,18 @@ onMounted(load);
 
     <Card v-else :flat="true">
       <p class="hint">
-        ⭐ favorite — picked first when filling a slot ·
-        🚫 disabled — never picked ·
-        👎 avoid — picked only as last resort ·
-        neutral (no icon) — default behaviour
+        Favorites are picked first when filling a slot. Avoided exercises are
+        picked only as a last resort. Disabled ones are never picked.
       </p>
       <p class="hint">
-        <strong>{{ counts.fav }}</strong> favorited ·
-        <strong>{{ counts.dis }}</strong> disabled ·
+        <strong>{{ counts.fav }}</strong> favorited, <strong>{{ counts.dis }}</strong> disabled,
         <strong>{{ counts.avo }}</strong> avoided
         of {{ counts.total }} {{ filter === "available" ? "available" : "total" }}
       </p>
     </Card>
 
     <section v-for="[muscle, list] in groupedByMuscle" :key="muscle" class="group">
-      <h2>{{ groupLabel(muscle) }} · {{ list.length }}</h2>
+      <h2>{{ groupLabel(muscle) }} <span class="gcount">{{ list.length }}</span></h2>
       <ul class="list">
         <li v-for="ex in list" :key="ex.id" :class="{
           fav: prefs[ex.id] === 'favorite',
@@ -420,9 +417,7 @@ onMounted(load);
                         :style="`-webkit-mask-image: url('${muscleIcon(ex.primary_muscle)}'); mask-image: url('${muscleIcon(ex.primary_muscle)}')`"/>
                   {{ muscleLabel(ex.primary_muscle) }}
                 </span>
-                <span v-else>{{ ex.primary_muscle }}</span>
-                · {{ ex.equipment.join(' + ') }}
-                · {{ ex.level }}
+                <span v-else>{{ ex.primary_muscle }}</span><span>, {{ ex.equipment.join(' + ') }}, {{ ex.level }}</span>
               </span>
             </div>
           </button>
@@ -469,9 +464,8 @@ onMounted(load);
           <div class="detail-title">
             <h2>{{ detailEx.name }}</h2>
             <div class="detail-tags">
-              {{ detailEx.movement_pattern.replace('_', ' ') }}
-              · {{ detailEx.equipment.join(' + ') }}
-              · {{ detailEx.level }}
+              {{ detailEx.movement_pattern.replace('_', ' ') }},
+              {{ detailEx.equipment.join(' + ') }}, {{ detailEx.level }}
             </div>
             <!-- CAT-1: mechanic + force badges -->
             <div v-if="detailEx.mechanic || detailEx.force" class="detail-badges">
@@ -484,9 +478,8 @@ onMounted(load);
                     :title="muscleLabel(detailEx.primary_muscle)"
                     :style="`-webkit-mask-image: url('${muscleIcon(detailEx.primary_muscle)}'); mask-image: url('${muscleIcon(detailEx.primary_muscle)}')`"/>
               <strong>{{ muscleLabel(detailEx.primary_muscle) || detailEx.primary_muscle }}</strong>
-              <span v-if="detailEx.secondary_muscles?.length">
-                ·
-                {{ detailEx.secondary_muscles.join(", ") }}
+              <span v-if="detailEx.secondary_muscles?.length">,
+                also {{ detailEx.secondary_muscles.join(", ") }}
               </span>
             </div>
             <div class="detail-actions">
@@ -567,7 +560,7 @@ header h1 { margin: 0; }
   display: flex; gap: 0.6rem; align-items: center;
   flex-wrap: wrap; margin-bottom: 0.8rem;
 }
-.cat-chips { display: flex; gap: 0.3rem; flex-wrap: wrap; flex: 1; min-width: 0; }
+.cat-chips { display: flex; gap: 0.3rem; flex-wrap: wrap; flex: 1 1 100%; min-width: 0; }
 .cat-chip {
   background: var(--bg-2); color: var(--muted);
   border: 1px solid var(--line); border-radius: 999px;
@@ -830,48 +823,56 @@ html[data-theme="neon"] .catalog header h1 {
 }
 
 /* Group headers → Space Grotesk mono-numeric heading rhythm */
+/* Section headings: sentence case, ink, no tracked micro-label. The count
+   is data, so it stays — muted, beside the name rather than after a " · ". */
 html[data-theme="neon"] .group h2 {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace;
-  color: var(--rn-mut); letter-spacing: 0.11em;
+  font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
+  font-size: 17px; font-weight: 500; letter-spacing: normal;
+  color: var(--rn-ink); margin: 1rem 0 0.55rem;
 }
+html[data-theme="neon"] .group h2 .gcount { color: var(--rn-mut); font-weight: 400; margin-left: 4px; }
 
 /* Search + selects on the obsidian card surface */
 html[data-theme="neon"] .search-input,
 html[data-theme="neon"] .clear-btn,
 html[data-theme="neon"] .muscle-select {
   background: var(--rn-card); color: var(--rn-ink);
-  border-color: #21243450;
+  border-color: transparent; border-radius: 12px;
 }
 html[data-theme="neon"] .search-input::placeholder { color: var(--rn-mut); }
 html[data-theme="neon"] .search-input:focus,
 html[data-theme="neon"] .muscle-select:focus {
-  border-color: var(--rn-cyan);
-  box-shadow: 0 0 0 1px rgba(40, 230, 255, 0.35), 0 0 14px rgba(40, 230, 255, 0.18);
+  border-color: var(--rn-cyan); box-shadow: none;
 }
 
 /* Filter / category chips — active state glows cyan */
+/* Filter chips: flat and neutral; the selected one is cyan text on a
+   low-alpha cyan fill. No outline, no glow. */
 html[data-theme="neon"] .cat-chip {
   background: var(--rn-card); color: var(--rn-mut);
-  border-color: #21243450;
+  border-color: transparent;
 }
-html[data-theme="neon"] .cat-chip:hover {
-  color: var(--rn-ink); border-color: rgba(40, 230, 255, 0.45);
-}
+html[data-theme="neon"] .cat-chip:hover { color: var(--rn-ink); border-color: transparent; }
 html[data-theme="neon"] .cat-chip.on {
   background: rgba(40, 230, 255, 0.14); color: var(--rn-cyan);
-  border-color: rgba(40, 230, 255, 0.5);
-  box-shadow: 0 0 12px rgba(40, 230, 255, 0.22);
+  border-color: transparent;
 }
-html[data-theme="neon"] .cat-chip.clear { color: var(--rn-mut); }
+html[data-theme="neon"] .cat-chip.clear { color: var(--rn-mut); background: transparent; border-style: none; }
 
 /* Hints / errors */
 html[data-theme="neon"] .hint { color: var(--rn-mut); }
+html[data-theme="neon"] .catalog :deep(.card) {
+  background: var(--rn-card); border-color: transparent; border-radius: 20px;
+}
 html[data-theme="neon"] .hint strong { color: var(--rn-ink); }
 html[data-theme="neon"] .err { color: var(--rn-red); }
 
 /* Row cards on the obsidian surface */
+/* Flat rows. The 3px left bar for favourite / avoid / disabled stays: that
+   is the user's own preference, a genuine signal, not decoration. */
+html[data-theme="neon"] .list { gap: 8px; }
 html[data-theme="neon"] .list li {
-  background: var(--rn-card); border-color: #21243450;
+  background: var(--rn-card); border-color: transparent; border-radius: 16px;
 }
 html[data-theme="neon"] .row-tap:hover .meta strong { color: var(--rn-cyan); }
 html[data-theme="neon"] .meta strong { color: var(--rn-ink); }
@@ -886,54 +887,51 @@ html[data-theme="neon"] .list li.disabled { border-left-color: var(--rn-red); }
 html[data-theme="neon"] .list li.avoid { border-left-color: var(--rn-peri); }
 
 /* Muscle-group accents → magenta glyphs / periwinkle yoga */
+/* Icons and muscle tags are labels, not data: quiet ink, not magenta. */
 html[data-theme="neon"] .list .thumb-mask,
 html[data-theme="neon"] .detail-head .thumb-mask.big {
-  background: var(--rn-mag);
-  box-shadow: inset 0 0 0 999px rgba(255, 58, 216, 0.10);
+  background: #c9c9da; box-shadow: none;
 }
-html[data-theme="neon"] .muscle-mask { background: var(--rn-mag); }
-html[data-theme="neon"] .muscle-chip { color: var(--rn-mag); }
+html[data-theme="neon"] .muscle-mask { background: var(--rn-mut); }
+html[data-theme="neon"] .muscle-chip { color: var(--rn-mut); border: 0; background: none; padding: 0; }
 html[data-theme="neon"] .list .ph {
-  background: #141726; border-color: #21243450; color: var(--rn-mut);
+  background: #141726; border-color: transparent; color: var(--rn-mut);
 }
 html[data-theme="neon"] .list .ph.yoga-ph,
 html[data-theme="neon"] .detail-head .ph.big.yoga-ph {
-  background: rgba(111, 123, 255, 0.10);
-  border: 1px solid rgba(111, 123, 255, 0.30);
+  background: #141726; border: 0;
 }
 
 /* Done pill → lime "performed", muted "never" */
+/* Times performed is a count, not a verdict: plain numeral, no pill. */
 html[data-theme="neon"] .done-pill {
-  background: rgba(93, 255, 59, 0.16); color: var(--rn-lime);
-  border-color: rgba(93, 255, 59, 0.35);
+  background: none; border-color: transparent; padding-left: 4px; padding-right: 0;
+  color: var(--rn-mut); font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 500;
 }
-html[data-theme="neon"] .done-pill.never {
-  background: rgba(155, 155, 176, 0.14); color: var(--rn-mut);
-  border-color: rgba(155, 155, 176, 0.28);
-}
+html[data-theme="neon"] .done-pill.never { background: none; border-color: transparent; color: #6f7184; }
 
 /* Action buttons — active states recolored to neon */
 html[data-theme="neon"] .act {
-  background: #141726; border-color: #21243450; color: var(--rn-mut);
+  background: #141726; border-color: transparent; color: var(--rn-mut); border-radius: 10px;
 }
 html[data-theme="neon"] .act:hover { color: var(--rn-ink); }
-html[data-theme="neon"] .act.vid:hover { color: var(--rn-cyan); border-color: rgba(40, 230, 255, 0.4); }
+html[data-theme="neon"] .act.vid:hover { color: var(--rn-cyan); border-color: transparent; }
 html[data-theme="neon"] .act.fav.on {
   background: rgba(255, 181, 46, 0.16); color: var(--rn-amber);
-  border-color: rgba(255, 181, 46, 0.4);
+  border-color: transparent;
 }
 html[data-theme="neon"] .act.avoid.on {
   background: rgba(111, 123, 255, 0.18); color: var(--rn-peri);
-  border-color: rgba(111, 123, 255, 0.4);
+  border-color: transparent;
 }
 html[data-theme="neon"] .act.dis.on {
   background: rgba(255, 93, 122, 0.16); color: var(--rn-red);
-  border-color: rgba(255, 93, 122, 0.4);
+  border-color: transparent;
 }
 
 /* Detail overlay → neon card chrome */
 html[data-theme="neon"] .detail-panel {
-  background: var(--rn-card); border-color: #21243450;
+  background: var(--rn-card); border-color: transparent; border-radius: 20px;
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
 }
 html[data-theme="neon"] .detail-close { color: var(--rn-mut); }
@@ -943,22 +941,29 @@ html[data-theme="neon"] .detail-tags {
   font-family: 'Space Grotesk', 'Geist Mono', monospace; color: var(--rn-mut);
 }
 html[data-theme="neon"] .detail-muscles strong { color: var(--rn-ink); }
-html[data-theme="neon"] .detail-section h3 { color: var(--rn-mut); }
-html[data-theme="neon"] .link-btn {
-  background: #141726; color: var(--rn-ink); border-color: #21243450;
+html[data-theme="neon"] .detail-section h3 {
+  color: var(--rn-ink); font-size: 17px; font-weight: 500;
+  letter-spacing: normal; text-transform: none;
 }
-html[data-theme="neon"] .link-btn:hover { color: var(--rn-cyan); border-color: rgba(40, 230, 255, 0.4); }
+html[data-theme="neon"] .ex-badge {
+  text-transform: none; letter-spacing: normal; border-color: transparent;
+  background: #141726; color: var(--rn-mut);
+}
+html[data-theme="neon"] .link-btn {
+  background: #141726; color: var(--rn-ink); border-color: transparent; border-radius: 10px;
+}
+html[data-theme="neon"] .link-btn:hover { color: var(--rn-cyan); border-color: transparent; }
 html[data-theme="neon"] .detail-head .ph.big {
-  background: #141726; border-color: #21243450; color: var(--rn-mut);
+  background: #141726; border-color: transparent; color: var(--rn-mut);
 }
 
 /* Stat tiles → Space Grotesk numerics on the card surface */
 html[data-theme="neon"] .stat {
-  background: #141726; border-color: #21243450;
+  background: #141726; border-color: transparent; border-radius: 14px;
 }
-html[data-theme="neon"] .stat-label { color: var(--rn-mut); }
+html[data-theme="neon"] .stat-label { color: var(--rn-mut); text-transform: none; letter-spacing: normal; font-size: 12px; }
 html[data-theme="neon"] .stat-val.mono {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace; color: var(--rn-ink);
+  font-family: 'Space Grotesk', 'Geist Mono', monospace; color: var(--rn-ink); font-weight: 500;
 }
 html[data-theme="neon"] .unit-s { color: var(--rn-mut); }
 html[data-theme="neon"] .dim { color: var(--rn-mut); }

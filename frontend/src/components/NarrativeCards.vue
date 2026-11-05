@@ -244,44 +244,48 @@ const shown = computed(() => events.value);
 
 <style scoped>
 .nc { margin: 18px 0; display: flex; flex-direction: column; gap: 12px; }
-.card { background: #1b1c1f; border-radius: 20px; padding: 16px; }
+/* The neon surface ramp (#181b27 card, #1e2230 inset), not the neutral greys
+   this card used to carry, which read as another app's panel on the page. */
+.card { background: #181b27; border-radius: 20px; padding: 16px; }
 
 .stamp {
   display: flex; align-items: center; gap: 7px;
-  font-size: .78rem; color: #b9bec6; margin-bottom: 8px;
+  font-size: .78rem; color: #9b9bb0; margin-bottom: 8px;
 }
 .moon { width: 15px; height: 15px; color: #b39ddb; flex: none; }
 
 .head {
-  font-size: 1.3rem; font-weight: 400; color: #e9edf2;
-  margin: 0 0 4px; letter-spacing: -0.2px;
+  font-size: 17px; font-weight: 500; color: #ececf5;
+  margin: 0 0 4px; letter-spacing: -0.1px;
 }
-.detail { font-size: .84rem; color: #b9bec6; margin: 0 0 12px; line-height: 1.35; }
+.detail { font-size: .84rem; color: #9b9bb0; margin: 0 0 12px; line-height: 1.4; max-width: 60ch; }
 
 .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
-.stat { background: #232428; border-radius: 14px; padding: 12px; }
-.slabel { font-size: .74rem; color: #b9bec6; }
+.stat { background: #1e2230; border-radius: 14px; padding: 12px; }
+.slabel { font-size: .74rem; color: #9b9bb0; }
 .svalue {
-  font-size: 1.5rem; font-weight: 300; color: #e9edf2;
+  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  font-size: 1.4rem; font-weight: 500; color: #ececf5;
   line-height: 1.15; margin: 2px 0 8px;
   font-variant-numeric: tabular-nums;
 }
-.schip {
-  display: inline-block; font-size: .66rem; font-weight: 500;
-  padding: 3px 9px; border-radius: 999px;
+/* Filled pill only for "watch"; good/typical are plain text. */
+.schip { display: inline-block; font-size: .75rem; }
+.schip.good { color: #5dff3b; }
+.schip.typical { color: #9b9bb0; }
+.schip.watch {
+  color: #ffb52e; background: rgba(255, 181, 46, .14);
+  font-size: .7rem; font-weight: 500; padding: 3px 9px; border-radius: 999px;
 }
-.schip.good { color: #7ee2a8; background: rgba(126, 226, 168, .16); }
-.schip.typical { color: #c7cbd1; background: rgba(199, 203, 209, .14); }
-.schip.watch { color: #e8b661; background: rgba(232, 182, 97, .16); }
 
-.hypno { background: #131417; border-radius: 14px; padding: 12px; }
+.hypno { background: #141722; border-radius: 14px; padding: 12px; }
 .lanes { position: relative; }
 .lane { margin-bottom: 10px; }
-.llabel { font-size: .76rem; color: #e9edf2; margin-bottom: 5px; }
-.ldur { color: #8d949d; }
+.llabel { font-size: .76rem; color: #ececf5; margin-bottom: 5px; }
+.ldur { color: #9b9bb0; }
 .track {
   position: relative; height: 18px;
-  background: #24262b; border-radius: 9px;
+  background: #23263a; border-radius: 9px;
 }
 .seg {
   position: absolute; top: 0; bottom: 0;
@@ -300,18 +304,18 @@ const shown = computed(() => events.value);
   border-radius: 999px; color: #8d949d; line-height: 0;
 }
 .thumb svg { width: 19px; height: 19px; }
-.thumb.on { color: #7ee2a8; background: rgba(126, 226, 168, .14); }
+.thumb.on { color: #28e6ff; background: rgba(40, 230, 255, .12); }
 .more {
   background: none; border: 0; cursor: pointer; color: #8d949d;
   font-size: 1.1rem; padding: 2px 8px; border-radius: 999px;
 }
 
 .menu {
-  margin-top: 8px; background: #232428; border-radius: 12px; padding: 4px;
+  margin-top: 8px; background: #1e2230; border-radius: 12px; padding: 4px;
 }
 .mitem {
   display: block; padding: 9px 12px; border-radius: 9px;
-  font-size: .82rem; color: #e9edf2; text-decoration: none;
+  font-size: .82rem; color: #ececf5; text-decoration: none;
 }
 
 .daybreak {
@@ -321,7 +325,7 @@ const shown = computed(() => events.value);
 .wave {
   flex: 1; height: 1px;
   background: repeating-linear-gradient(
-    90deg, #3a3d45 0 6px, transparent 6px 10px);
+    90deg, #2c3046 0 6px, transparent 6px 10px);
 }
-.dlabel { font-size: .8rem; color: #b9bec6; }
+.dlabel { font-size: .8rem; color: #9b9bb0; }
 </style>

@@ -225,7 +225,7 @@ const ownedSummary = computed(() => {
   if (e.kettlebells_lb.length) parts.push(`kb ${e.kettlebells_lb.join("/")} lb`);
   if (e.resistance_bands) parts.push("bands");
   if (e.training_partner) parts.push("partner");
-  return parts.join(" · ") || "(nothing yet)";
+  return parts.join(", ") || "(nothing yet)";
 });
 
 onMounted(() => { equip.value = defaultEquip(); load(); });
@@ -484,10 +484,10 @@ onMounted(() => { equip.value = defaultEquip(); load(); });
             </label>
             <span class="hint prog-detail">
               {{ lift.scheme === 'greyskull'
-                  ? `${lift.sets}×${lift.reps_low}, last set AMRAP · +${lift.increment_lb} lb (double at ${(lift.reps_low ?? 5) * 2}+) · 1 miss → deload`
+                  ? `${lift.sets}×${lift.reps_low}, last set AMRAP. +${lift.increment_lb} lb (double at ${(lift.reps_low ?? 5) * 2}+), one miss deloads.`
                   : lift.scheme === 'double'
-                  ? `${lift.sets}×${lift.reps_low}-${lift.reps_high} · +${lift.increment_lb} lb once every set hits ${lift.reps_high}`
-                  : `${lift.sets}×${lift.reps_low} · +${lift.increment_lb} lb/session · ${lift.fails_before_deload} misses → deload` }}
+                  ? `${lift.sets}×${lift.reps_low}-${lift.reps_high}. +${lift.increment_lb} lb once every set hits ${lift.reps_high}.`
+                  : `${lift.sets}×${lift.reps_low}. +${lift.increment_lb} lb a session, ${lift.fails_before_deload} misses deload.` }}
             </span>
           </div>
 
@@ -628,41 +628,49 @@ html[data-theme="neon"] .strength-equipment h1 {
   color: var(--rn-ink); letter-spacing: -0.5px;
 }
 
-/* Section sub-headers + hints → neon muted, Space Grotesk caps */
+/* Section headings: sentence case, ink, no tracked caps. */
 html[data-theme="neon"] .strength-equipment .sub {
-  font-family: 'Space Grotesk', 'Geist Mono', monospace;
-  letter-spacing: 0.12em; color: var(--rn-mut);
+  font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
+  font-size: 17px; font-weight: 500; letter-spacing: normal;
+  text-transform: none; color: var(--rn-ink); margin: 1.4rem 0 0.5rem;
+}
+/* The shared Card: flat obsidian surface, no hairline, no gradient. Its
+   micro-label subtitle (the owned-gear summary) reads as a plain line. */
+html[data-theme="neon"] .strength-equipment :deep(.card) {
+  background: var(--rn-card); border-color: transparent; border-radius: 20px;
+}
+html[data-theme="neon"] .strength-equipment :deep(.card > header .sub) {
+  font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
+  font-size: 13px; color: rgba(236, 236, 245, .85); letter-spacing: normal;
 }
 html[data-theme="neon"] .strength-equipment .hint { color: var(--rn-mut); }
 html[data-theme="neon"] .strength-equipment .hint strong { color: var(--rn-ink); }
 
 /* ---- Selectable chips (DB pairs) → neon card surface, lime when owned ---- */
+/* Owned/not-owned chips are a selection, so they use the one selection
+   colour: cyan text on a low-alpha cyan fill. No outline, no glow. */
 html[data-theme="neon"] .strength-equipment .chip {
-  background: var(--rn-card); border-color: #21243480;
+  background: #141726; border-color: transparent;
   color: var(--rn-mut);
-  font-family: 'Space Grotesk', 'Geist Mono', monospace;
-  border-radius: 9px;
+  font-family: 'Space Grotesk', 'Geist Mono', monospace; font-weight: 500;
+  border-radius: 10px;
 }
 html[data-theme="neon"] .strength-equipment .chip:hover {
-  color: var(--rn-ink); border-color: rgba(40, 230, 255, 0.45);
+  color: var(--rn-ink); border-color: transparent;
 }
 html[data-theme="neon"] .strength-equipment .chip.on {
-  background: rgba(93, 255, 59, 0.14); color: var(--rn-lime);
-  border-color: rgba(93, 255, 59, 0.55);
-  text-shadow: 0 0 8px rgba(93, 255, 59, 0.40);
+  background: rgba(40, 230, 255, 0.14); color: var(--rn-cyan);
+  border-color: transparent; text-shadow: none;
 }
 
-/* ---- Micro-loader / wrist-weight chips → lime (owned = good/completed,
-       matching the DB-pair chips; magenta is reserved for sleep/sober) ---- */
 html[data-theme="neon"] .strength-equipment .chip.small.on {
-  background: rgba(93, 255, 59, 0.14); color: var(--rn-lime);
-  border-color: rgba(93, 255, 59, 0.55);
-  text-shadow: 0 0 8px rgba(93, 255, 59, 0.40);
+  background: rgba(40, 230, 255, 0.14); color: var(--rn-cyan);
+  border-color: transparent; text-shadow: none;
 }
 html[data-theme="neon"] .strength-equipment .wrist-add input,
 html[data-theme="neon"] .strength-equipment .adj-grid input {
-  background: var(--rn-card); border: 1px solid #21243480;
-  color: var(--rn-ink); border-radius: 8px;
+  background: #141726; border: 1px solid transparent;
+  color: var(--rn-ink); border-radius: 10px;
 }
 html[data-theme="neon"] .strength-equipment .adj-grid label,
 html[data-theme="neon"] .strength-equipment .auto-chk,
@@ -672,8 +680,15 @@ html[data-theme="neon"] .strength-equipment .train-row > span:first-child {
 
 /* ---- Ghost button (Add custom) ---- */
 html[data-theme="neon"] .strength-equipment .ghost {
-  background: rgba(40, 230, 255, 0.08); color: var(--rn-cyan);
-  border: 1px solid rgba(40, 230, 255, 0.32); border-radius: 8px;
+  background: #141726; color: var(--rn-cyan);
+  border: 1px solid transparent; border-radius: 10px;
+}
+html[data-theme="neon"] .strength-equipment .prog-lift {
+  background: #141726; border-color: transparent; border-radius: 14px;
+}
+html[data-theme="neon"] .strength-equipment .prog-weight input,
+html[data-theme="neon"] .strength-equipment .prog-add select {
+  background: var(--rn-card); border-color: transparent; color: var(--rn-ink); border-radius: 10px;
 }
 
 /* ---- Status indicators: radios / checkboxes / range tint to neon cyan ---- */
@@ -692,27 +707,26 @@ html[data-theme="neon"] .strength-equipment .train-row.toggle .toggle-text stron
 }
 html[data-theme="neon"] .strength-equipment .slider-row .mono {
   font-family: 'Space Grotesk', 'Geist Mono', monospace;
-  color: var(--rn-cyan); text-shadow: 0 0 8px rgba(40, 230, 255, 0.40);
+  color: var(--rn-ink); font-weight: 500; text-shadow: none;
 }
 
 /* ---- Segmented toggles (training prefs) → cyan when selected ---- */
 html[data-theme="neon"] .strength-equipment .seg button {
-  background: var(--rn-card); border-color: #21243480;
+  background: #141726; border-color: transparent; border-radius: 10px;
   color: var(--rn-mut);
-  font-family: 'Space Grotesk', 'Geist Mono', monospace;
+  font-family: 'Plus Jakarta Sans', 'Geist', system-ui;
 }
 html[data-theme="neon"] .strength-equipment .seg button:hover {
-  color: var(--rn-ink); border-color: rgba(40, 230, 255, 0.45);
+  color: var(--rn-ink); border-color: transparent;
 }
 html[data-theme="neon"] .strength-equipment .seg button.on {
-  background: rgba(40, 230, 255, 0.16); color: var(--rn-cyan);
-  border-color: rgba(40, 230, 255, 0.55);
-  text-shadow: 0 0 8px rgba(40, 230, 255, 0.40);
+  background: rgba(40, 230, 255, 0.14); color: var(--rn-cyan);
+  border-color: transparent; text-shadow: none;
 }
 
-/* ---- Primary save button → cyan with glow ---- */
+/* ---- Primary save button: the one cyan fill on the page, no glow ---- */
 html[data-theme="neon"] .strength-equipment .actions .primary {
-  background: var(--rn-cyan); color: #0f1118; font-weight: 700;
-  box-shadow: 0 0 16px rgba(40, 230, 255, 0.40);
+  background: var(--rn-cyan); color: #06121a; font-weight: 600;
+  box-shadow: none; border-radius: 999px; padding: 0.6rem 1.3rem;
 }
 </style>

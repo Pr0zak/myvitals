@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -50,6 +51,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -293,9 +295,6 @@ fun TrainHubContent(
     NeonScreen(
         title = "Train",
         contentPadding = contentPadding,
-        headerTrailing = {
-            if (weekCount != null) WeekChip(weekCount) { onOpen("activities") }
-        },
         refreshing = refreshing,
         onRefresh = onRefresh,
     ) {
@@ -312,13 +311,15 @@ fun TrainHubContent(
             else -> SessionHero(
                 workout = workout,
                 timeline = weekTimeline(today, upcoming, yearWorkouts, activities, zone),
+                weekCount = weekCount,
+                onOpenWeek = { onOpen("activities") },
                 onClick = { onOpen("workout/today") },
             )
         }
 
         // ── 2. Weekly volume chart ─────────────────────────────────────
         stats?.week?.let { w ->
-            NeonEyebrow("This week's volume")
+            SectionHeading("This week's volume")
             WeekVolumeCard(w, sessions = stats.consistency?.sessionsLast7d, zone = zone) {
                 onOpen("workout/charts")
             }
@@ -327,7 +328,7 @@ fun TrainHubContent(
         // ── 3. Muscle volume vs range ──────────────────────────────────
         muscles?.let { mv ->
             if (mv.muscles.isNotEmpty()) {
-                NeonEyebrow("Sets per muscle · last ${mv.windowDays} days")
+                SectionHeading("Sets per muscle, last ${mv.windowDays} days")
                 MuscleRangeCard(mv.muscles) { onOpen("workout/history") }
             }
         }
@@ -337,11 +338,11 @@ fun TrainHubContent(
             app.myvitals.ui.common.buildActivityCalendarIndex(activities, yearWorkouts, today.year)
         }
         ytd?.let { y ->
-            NeonEyebrow("This year")
+            SectionHeading("This year")
             app.myvitals.ui.common.YtdServerPair(y, onClick = { onOpen("activities") })
         }
         if (calIndex.isNotEmpty()) {
-            NeonEyebrow("Activity calendar")
+            SectionHeading("Activity calendar")
             app.myvitals.ui.common.ActivityCalendarCard(
                 rows = activities, workouts = yearWorkouts,
                 neon = true, year = today.year, title = null,
@@ -354,7 +355,7 @@ fun TrainHubContent(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            NeonEyebrow("Recent · last 7 days")
+            SectionHeading("Last 7 days")
             SeeAll { onOpen("activities") }
         }
         if (availableFilters.size > 1) {
@@ -416,7 +417,7 @@ fun TrainHubContent(
         }
 
         // ── 6. Tile grid ───────────────────────────────────────────────
-        NeonEyebrow("More")
+        SectionHeading("More")
         TileGrid(
             listOf(
                 Tile("Activities", Icons.AutoMirrored.Outlined.FormatListBulleted, NeonMV.Cyan, "activities"),
@@ -493,13 +494,13 @@ private data class HeroCta(
  */
 private fun heroCta(w: StrengthWorkoutDetail?): HeroCta {
     if (w == null) return HeroCta("View", muted = true)
-    if (w.status == "completed") return HeroCta("Done · see review", muted = true)
-    if (w.status == "skipped") return HeroCta("Skipped · view", muted = true)
+    if (w.status == "completed") return HeroCta("See the review", muted = true)
+    if (w.status == "skipped") return HeroCta("View the skipped day", muted = true)
     if (w.splitFocus.contains("rest", true)) return HeroCta("View", muted = true)
     val n = w.nextUp
     return when {
         n != null && n.started -> HeroCta("Continue", muted = false,
-            name = n.name, suffix = ", set ${n.setNumber}")
+            name = n.name, suffix = "set ${n.setNumber}")
         n != null -> HeroCta("Start", muted = false)
         w.status == "in_progress" || w.status == "paused" -> HeroCta("Resume", muted = false)
         else -> HeroCta("Start", muted = false)
@@ -519,112 +520,185 @@ private fun muscleColor(m: String): Color = when (m.lowercase()) {
     else -> NeonMV.Muted
 }
 
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+/**
+ * Session hero in the Today-brief language (twin of `Train.vue`): on the page
+ * ground, no card. Rings left — sets outer (lime), exercises inner (cyan) —
+ * with sets done in the centre; a legend right that carries the words (split,
+ * exercises, the next set); then the one cyan action, the Mon–Sun dots and a
+ * quiet status line that replaced the header's "This week" pill.
+ *
+ * Every number is the server's counter (SKIP-1); value / total is arc
+ * geometry only.
+ */
 @Composable
 private fun SessionHero(
     workout: StrengthWorkoutDetail?,
     timeline: List<TimelineDot>,
+    weekCount: Int?,
+    onOpenWeek: () -> Unit,
     onClick: () -> Unit,
 ) {
     val cta = heroCta(workout)
     val isRest = workout == null || workout.splitFocus.contains("rest", true)
-    val completed = workout?.status == "completed"
-    // SKIP-1: both counters are the server's, rendered verbatim.
     val setsDone = workout?.setsDone ?: 0
     val setsTotal = workout?.setsTotal ?: 0
     val exDone = workout?.exercisesDone ?: 0
     val exTotal = workout?.exercisesTotal ?: 0
-    // The plan's muscles: rows of the projection that today's plan adds to.
     val chips = workout?.projectedMuscleVolume
         ?.filter { (it.value.setsPlanned ?: 0.0) > 0.0 }
         ?.entries?.sortedByDescending { it.value.setsPlanned ?: 0.0 }
-        ?.map { it.key }?.take(5).orEmpty()
+        ?.map { it.key }?.take(3).orEmpty()
+    val tag = when {
+        workout?.status == "completed" -> "Done"
+        workout?.status == "skipped" -> "Skipped"
+        exTotal == 1 -> "1 exercise"
+        exTotal > 1 -> "$exTotal exercises"
+        isRest -> "Nothing planned"
+        else -> null
+    }
 
-    NeonHeroCard(accent = NeonMV.Lime) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            NeonRing(
-                fraction = if (setsTotal > 0) setsDone.toFloat() / setsTotal else 0f,
-                color = NeonMV.Lime,
-                size = 120.dp,
-                stroke = 10.dp,
-                outerFraction = if (exTotal > 0) exDone.toFloat() / exTotal else 0f,
-                outerColor = NeonMV.Cyan,
+    Column(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 20.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(176.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onClick),
+                contentAlignment = Alignment.Center,
             ) {
-                if (setsTotal > 0) {
-                    NeonNumber("$setsDone/$setsTotal", color = NeonMV.Lime, size = 22)
-                    NeonRingCaption("sets")
-                    Text("$exDone/$exTotal ex", color = NeonMV.Cyan, fontSize = 10.sp,
-                        fontFamily = NeonNumberFamily, fontWeight = FontWeight.Bold)
-                } else {
-                    NeonNumber("—", color = NeonMV.Muted, size = 22)
-                    NeonRingCaption(if (isRest) "rest" else "no sets")
+                HeroRings(
+                    listOf(
+                        NeonMV.Lime to (if (setsTotal > 0) setsDone.toFloat() / setsTotal else null),
+                        NeonMV.Cyan to (if (exTotal > 0) exDone.toFloat() / exTotal else null),
+                    ),
+                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        if (setsTotal > 0) "$setsDone/$setsTotal" else "—",
+                        color = NeonMV.Ink, fontSize = 34.sp,
+                        fontFamily = NeonNumberFamily, fontWeight = FontWeight.Medium,
+                        letterSpacing = (-1).sp,
+                    )
+                    Text(
+                        if (setsTotal > 0) "Sets" else if (isRest) "Rest" else "No sets",
+                        color = NeonMV.Muted, fontSize = 11.sp,
+                    )
                 }
             }
-            Column(Modifier.weight(1f)) {
-                Text(
-                    when {
-                        completed -> "TODAY · DONE"
-                        workout?.status == "skipped" -> "TODAY · SKIPPED"
-                        exTotal == 1 -> "TODAY · 1 EXERCISE"
-                        exTotal > 1 -> "TODAY · $exTotal EXERCISES"
-                        else -> "TODAY"
-                    },
-                    color = if (completed) NeonMV.Muted else NeonMV.Lime,
-                    fontFamily = NeonNumberFamily,
-                    fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp,
-                    maxLines = 1,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    if (isRest) "Rest day" else titleCase(workout!!.splitFocus),
-                    color = NeonMV.Ink, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = (-0.5).sp, maxLines = 2, lineHeight = 28.sp,
-                )
-                if (chips.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) { chips.forEach { MuscleChip(it) } }
+            Spacer(Modifier.width(18.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                HeroLegendRow(NeonMV.Lime, "Today",
+                    if (isRest) "Rest day" else titleCase(workout!!.splitFocus), tag)
+                HeroLegendRow(NeonMV.Cyan, "Exercises",
+                    if (exTotal > 0) "$exDone of $exTotal" else "—",
+                    chips.takeIf { it.isNotEmpty() }?.joinToString(", ") { titleCase(it) })
+                if (cta.name != null) {
+                    HeroLegendRow(NeonMV.Track, "Up next", cta.name, cta.suffix, valueSize = 16)
                 }
             }
         }
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(18.dp))
         Box(
             Modifier
                 .fillMaxWidth()
                 .height(48.dp)
                 .clip(RoundedCornerShape(14.dp))
-                .background(if (cta.muted) NeonMV.Card else NeonMV.Lime)
-                .border(1.dp, if (cta.muted) NeonMV.Track else NeonMV.Lime, RoundedCornerShape(14.dp))
+                .background(if (cta.muted) NeonMV.Card else NeonMV.Cyan)
                 .clickable(onClick = onClick)
                 .semantics { role = Role.Button }
                 .padding(horizontal = 16.dp),
             contentAlignment = Alignment.Center,
         ) {
-            // Only the exercise NAME may ellipsize: a long name used to push
-            // "set 3" — the part that says where you are — off the button.
-            val ink = if (cta.muted) NeonMV.Muted else NeonMV.OnAccent
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(cta.label, color = ink, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
-                if (cta.name != null) {
-                    Text(" · ", color = ink, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
-                    Text(cta.name, color = ink, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false))
-                    Text(cta.suffix.orEmpty(), color = ink, fontSize = 15.sp,
-                        fontWeight = FontWeight.ExtraBold, maxLines = 1)
-                }
-            }
+            Text(
+                if (cta.name != null) "${cta.label} ${cta.suffix.orEmpty()}" else cta.label,
+                color = if (cta.muted) NeonMV.Muted else NeonMV.OnAccent,
+                fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
         }
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(16.dp))
         WeekDots(timeline)
+
+        if (weekCount != null) {
+            Spacer(Modifier.height(14.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onOpenWeek),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(6.dp).clip(CircleShape).background(NeonMV.Lime))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "$weekCount session${if (weekCount == 1) "" else "s"} in the last 7 days",
+                    color = NeonMV.Ink.copy(alpha = 0.85f), fontSize = 13.sp,
+                )
+                Spacer(Modifier.weight(1f))
+                Text("See all", color = NeonMV.Muted, fontSize = 12.sp)
+            }
+        }
     }
+}
+
+/** Concentric arcs from 12 o'clock, outer first. A null fraction draws the
+ *  track only — "no plan" must not look like "zero done". */
+@Composable
+private fun HeroRings(rings: List<Pair<Color, Float?>>) {
+    Canvas(Modifier.fillMaxSize()) {
+        val stroke = 13.dp.toPx()
+        val gap = 4.dp.toPx()
+        rings.forEachIndexed { i, (color, f) ->
+            val inset = stroke / 2f + i * (stroke + gap)
+            val d = size.minDimension - inset * 2f
+            val tl = Offset((size.width - d) / 2f, (size.height - d) / 2f)
+            val sz = Size(d, d)
+            drawArc(color.copy(alpha = 0.13f), 0f, 360f, false, tl, sz, style = Stroke(stroke))
+            if (f != null && f > 0f) {
+                val sweep = 360f * f.coerceIn(0f, 1f)
+                drawArc(color.copy(alpha = 0.12f), -90f, sweep, false, tl, sz,
+                    style = Stroke(stroke + 4.dp.toPx(), cap = StrokeCap.Round))
+                drawArc(color, -90f, sweep, false, tl, sz,
+                    style = Stroke(stroke, cap = StrokeCap.Round))
+            }
+        }
+    }
+}
+
+/** TodayBrief's legend row: 3dp colour bar, muted label, number-face value,
+ *  muted sub line. */
+@Composable
+private fun HeroLegendRow(color: Color, label: String, value: String, sub: String?, valueSize: Int = 20) {
+    Row(verticalAlignment = Alignment.Top) {
+        Box(
+            Modifier
+                .padding(top = 5.dp)
+                .size(width = 3.dp, height = 30.dp)
+                .background(color, RoundedCornerShape(2.dp)),
+        )
+        Spacer(Modifier.width(10.dp))
+        Column {
+            Text(label, color = NeonMV.Muted, fontSize = 12.sp)
+            Text(value, color = NeonMV.Ink, fontSize = valueSize.sp,
+                fontFamily = NeonNumberFamily, fontWeight = FontWeight.Medium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            sub?.let {
+                Text(it, color = NeonMV.Muted, fontSize = 11.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/** Sentence-case section heading — replaces the tracked-caps eyebrow. */
+@Composable
+private fun SectionHeading(text: String) {
+    Text(
+        text, color = NeonMV.Ink, fontSize = 17.sp, fontWeight = FontWeight.Medium,
+        modifier = Modifier.padding(top = 22.dp, bottom = 10.dp),
+    )
 }
 
 @Composable
@@ -678,9 +752,8 @@ private fun WeekDots(dots: List<TimelineDot>) {
                 val isToday = d.state == DotState.Today || d.state == DotState.TodayDone
                 Text(
                     d.date.dayOfWeek.getDisplayName(java.time.format.TextStyle.NARROW, java.util.Locale.getDefault()),
-                    color = if (isToday) NeonMV.Lime else NeonMV.Muted,
-                    fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                    fontFamily = NeonNumberFamily,
+                    color = if (isToday) NeonMV.Ink else NeonMV.Muted,
+                    fontSize = 10.sp, fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
                 )
             }
         }
@@ -690,10 +763,10 @@ private fun WeekDots(dots: List<TimelineDot>) {
 /** Loading shape of the hero, so the page does not jump when it lands. */
 @Composable
 private fun HeroSkeleton() {
-    NeonHeroCard(accent = NeonMV.Lime) {
+    Column(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 20.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            ShimmerBlock(width = 120.dp, height = 120.dp, cornerRadius = 60.dp, accent = NeonMV.Lime)
+            horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+            ShimmerBlock(width = 176.dp, height = 176.dp, cornerRadius = 88.dp, accent = NeonMV.Lime)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ShimmerBlock(width = 110.dp, height = 11.dp, accent = NeonMV.Lime)
                 ShimmerBlock(Modifier.fillMaxWidth(0.8f), height = 26.dp, accent = NeonMV.Lime)
@@ -726,7 +799,6 @@ private fun WeekVolumeCard(
             .fillMaxWidth()
             .clip(NeonCardShape)
             .background(NeonMV.Card)
-            .border(1.dp, NeonMV.Line, NeonCardShape)
             .clickable(onClick = onClick)
             .padding(16.dp),
     ) {
@@ -740,7 +812,7 @@ private fun WeekVolumeCard(
         Text(
             buildString {
                 append("vs %,.0f lb the week before".format(w.prevTotalLb))
-                if (sessions != null) append(" · $sessions session${if (sessions == 1) "" else "s"}")
+                if (sessions != null) append(", $sessions session${if (sessions == 1) "" else "s"}")
             },
             color = NeonMV.Muted, fontSize = 12.sp,
         )
@@ -770,9 +842,6 @@ private fun WeekVolumeCard(
                 )
                 val h = (d.volumeLb / maxV).toFloat() * size.height
                 if (h > 0f) {
-                    drawRoundRect(NeonMV.Lime.copy(alpha = 0.22f),
-                        Offset(cx - barW / 2 - 2.dp.toPx(), size.height - h - 2.dp.toPx()),
-                        Size(barW + 4.dp.toPx(), h + 2.dp.toPx()), cr)
                     drawRoundRect(NeonMV.Lime, Offset(cx - barW / 2, size.height - h), Size(barW, h), cr)
                 }
             }
@@ -782,8 +851,8 @@ private fun WeekVolumeCard(
             w.days.forEach { d ->
                 Text(
                     dayLabel(d.date, java.time.format.TextStyle.NARROW),
-                    color = if (d.date == w.end) NeonMV.Lime else NeonMV.Muted,
-                    fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = NeonNumberFamily,
+                    color = if (d.date == w.end) NeonMV.Ink else NeonMV.Muted,
+                    fontSize = 10.sp, fontWeight = if (d.date == w.end) FontWeight.Bold else FontWeight.Normal,
                     textAlign = TextAlign.Center, modifier = Modifier.weight(1f),
                 )
             }
@@ -817,14 +886,11 @@ private fun DeltaChip(w: StrengthWeekVolume) {
         w.direction == "worse" -> "▼ %.0f%%".format(kotlin.math.abs(pct)) to NeonMV.Amber
         else -> "≈ same" to NeonMV.Muted
     }
+    // Plain coloured text: the direction is the data, a pill around it
+    // was decoration.
     Text(
-        text, color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+        text, color = color, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
         fontFamily = NeonNumberFamily,
-        modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(color.copy(alpha = 0.12f))
-            .border(1.dp, color.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
-            .padding(horizontal = 8.dp, vertical = 3.dp),
     )
 }
 
@@ -855,7 +921,6 @@ private fun MuscleRangeCard(rows: Map<String, MuscleVolumeRow>, onClick: () -> U
             .fillMaxWidth()
             .clip(NeonCardShape)
             .background(NeonMV.Card)
-            .border(1.dp, NeonMV.Line, NeonCardShape)
             .clickable(onClick = onClick)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(9.dp),
@@ -884,7 +949,6 @@ private fun MuscleRangeCard(rows: Map<String, MuscleVolumeRow>, onClick: () -> U
                     drawRoundRect(NeonMV.Lime.copy(alpha = 0.28f), Offset(x0, y - th / 2),
                         Size((x1 - x0).coerceAtLeast(1f), th), CornerRadius(th / 2, th / 2))
                     val xv = (r.sets / scale).coerceIn(0f, 1f) * size.width
-                    drawCircle(c.copy(alpha = 0.3f), 7.dp.toPx(), Offset(xv, y))
                     drawCircle(c, 4.5.dp.toPx(), Offset(xv, y))
                 }
                 Spacer(Modifier.width(8.dp))
@@ -934,7 +998,6 @@ private fun TileGrid(tiles: List<Tile>, onOpen: (String) -> Unit) {
                             .heightIn(min = 76.dp)
                             .clip(NeonCardShape)
                             .background(NeonMV.Card)
-                            .border(1.dp, NeonMV.Line, NeonCardShape)
                             .clickable { onOpen(t.route) }
                             .semantics(mergeDescendants = true) {
                                 role = Role.Button
@@ -965,22 +1028,6 @@ private fun ytdSinceIso(): String =
     LocalDate.of(LocalDate.now().year - 1, 1, 1)
         .atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toString()
 
-@Composable
-private fun WeekChip(count: Int, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(NeonMV.Lime.copy(alpha = 0.12f))
-            .border(1.dp, NeonMV.Lime.copy(alpha = 0.25f), RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("This week · ", color = NeonMV.Lime, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        NeonNumber("$count", color = NeonMV.Lime, size = 13, weight = FontWeight.Bold)
-    }
-}
-
 /** Small cyan "See all" text + chevron affordance. */
 @Composable
 private fun SeeAll(onClick: () -> Unit) {
@@ -992,8 +1039,7 @@ private fun SeeAll(onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        Text("See all", color = NeonMV.Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold,
-            letterSpacing = 0.6.sp)
+        Text("See all", color = NeonMV.Cyan, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         Icon(Icons.AutoMirrored.Outlined.ArrowForwardIos, contentDescription = null,
             tint = NeonMV.Cyan, modifier = Modifier.size(9.dp))
     }
@@ -1120,7 +1166,7 @@ private fun activitySub(a: ActivityRow, today: LocalDate, zone: ZoneId): String 
     val parts = mutableListOf(if (at != null) relDay(at, today, zone) else "—")
     val mi = milesOrNull(a.distanceM)
     if (mi != null) parts.add(mi) else parts.add(titleCase(a.type))
-    return parts.filter { it.isNotBlank() }.joinToString(" · ")
+    return parts.filter { it.isNotBlank() }.joinToString(", ")
 }
 
 private fun activityValue(a: ActivityRow, cls: ActivityClass): String {

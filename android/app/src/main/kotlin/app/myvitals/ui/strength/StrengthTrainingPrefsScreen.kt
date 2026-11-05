@@ -182,7 +182,7 @@ fun StrengthTrainingPrefsScreen(
                     Segmented(
                         options = listOf("auto", "adaptive", "full_body", "upper_lower", "ppl"),
                         selected = t.splitPreference,
-                        labelMap = mapOf("full_body" to "full body", "upper_lower" to "upper-lower"),
+                        labelMap = mapOf("full_body" to "full body", "upper_lower" to "upper/lower"),
                         onSelect = { update(t.copy(splitPreference = it)) },
                         neon = neon,
                     )
@@ -215,6 +215,8 @@ fun StrengthTrainingPrefsScreen(
                         modifier = Modifier.padding(top = 6.dp),
                     )
 
+                    if (neon) Spacer(Modifier.height(14.dp))
+                    PrefsGroup(neon) {
                     ToggleRow(
                         label = "Mobility cool-down",
                         hint = "Adds 2 yoga poses (~30 s holds) to the end of "
@@ -231,6 +233,7 @@ fun StrengthTrainingPrefsScreen(
                         onCheckedChange = { update(t.copy(yogaOnRestDays = it)) },
                         accent = accent, ink = ink, muted = muted,
                     )
+                    }
 
                     // ── PROG-1 program mode ──
                     ProgramModeSection(
@@ -247,8 +250,12 @@ fun StrengthTrainingPrefsScreen(
                         colors = ButtonDefaults.buttonColors(
                             containerColor = accent, contentColor = onAccent,
                         ),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text(if (saving) "Saving…" else "Save preferences") }
+                        shape = if (neon) RoundedCornerShape(999.dp) else ButtonDefaults.shape,
+                        modifier = Modifier.fillMaxWidth().then(
+                            if (neon) Modifier.height(50.dp) else Modifier,
+                        ),
+                    ) { Text(if (saving) "Saving…" else "Save preferences",
+                        fontWeight = if (neon) FontWeight.SemiBold else null) }
                     status?.let { Text(it, color = good, fontSize = 12.sp,
                         modifier = Modifier.padding(top = 6.dp)) }
                     error?.let { Text(it, color = bad, fontSize = 12.sp,
@@ -274,18 +281,47 @@ private fun ToggleRow(
     muted: androidx.compose.ui.graphics.Color,
 ) {
     Row(
-        Modifier.fillMaxWidth().padding(top = 12.dp),
+        Modifier.fillMaxWidth().padding(top = 12.dp, bottom = if (accent == NeonMV.Cyan) 8.dp else 0.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f).padding(end = 8.dp)) {
-            Text(label, color = ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Text(hint, color = muted, fontSize = 11.sp)
+            Text(label, color = ink, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(hint, color = muted, fontSize = 12.sp)
         }
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(checkedTrackColor = accent),
+            colors = prefsSwitchColors(accent),
         )
+    }
+}
+
+/** Switch colours. Under neon (accent = cyan) the switch sits on a Card-
+ *  coloured group, so the off track steps up to CardHigh with no outline
+ *  and the on thumb is dark ink on the cyan track. Classic is unchanged. */
+@Composable
+private fun prefsSwitchColors(accent: androidx.compose.ui.graphics.Color) =
+    if (accent == NeonMV.Cyan) SwitchDefaults.colors(
+        checkedTrackColor = NeonMV.Cyan,
+        checkedThumbColor = NeonMV.OnAccent,
+        uncheckedTrackColor = NeonMV.CardHigh,
+        uncheckedThumbColor = NeonMV.Muted,
+        uncheckedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+    ) else SwitchDefaults.colors(checkedTrackColor = accent)
+
+/** A run of settings rows. Neon: one flat card holds the group. */
+@Composable
+private fun PrefsGroup(neon: Boolean, content: @Composable () -> Unit) {
+    if (neon) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(NeonMV.Card)
+                .padding(horizontal = 14.dp, vertical = 2.dp),
+        ) { content() }
+    } else {
+        Column { content() }
     }
 }
 
@@ -318,17 +354,19 @@ private fun ProgramModeSection(
         color = muted, fontSize = 11.sp,
         modifier = Modifier.padding(bottom = 6.dp),
     )
+    PrefsGroup(neon) {
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        Modifier.fillMaxWidth().padding(vertical = if (neon) 8.dp else 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("Enable program mode", color = ink, fontSize = 13.sp,
+        Text("Enable program mode", color = ink, fontSize = if (neon) 14.sp else 13.sp,
             modifier = Modifier.weight(1f))
         Switch(
             checked = program.enabled,
             onCheckedChange = { onChange(program.copy(enabled = it)) },
-            colors = SwitchDefaults.colors(checkedTrackColor = accent),
+            colors = prefsSwitchColors(accent),
         )
+    }
     }
 
     if (program.enabled) {
@@ -398,7 +436,7 @@ private fun ProgramLiftCard(
     muted: androidx.compose.ui.graphics.Color,
 ) {
     val cellBg = if (neon) NeonMV.Card else MV.SurfaceContainerLow
-    val cellBorder = if (neon) NeonMV.Line else MV.OutlineVariant
+    val cellBorder = if (neon) androidx.compose.ui.graphics.Color.Transparent else MV.OutlineVariant
     val bad = if (neon) NeonMV.Bad else MV.Red
 
     var weightText by remember(lift.exerciseId) {
@@ -406,20 +444,20 @@ private fun ProgramLiftCard(
     }
 
     val detail = when (lift.scheme) {
-        "greyskull" -> "${lift.sets}×${lift.repsLow}, last set AMRAP · +${fmtLb(lift.incrementLb)} lb " +
-            "(double at ${lift.repsLow * 2}+) · 1 miss → deload"
-        "double" -> "${lift.sets}×${lift.repsLow}-${lift.repsHigh} · +${fmtLb(lift.incrementLb)} lb " +
-            "once every set hits ${lift.repsHigh}"
-        else -> "${lift.sets}×${lift.repsLow} · +${fmtLb(lift.incrementLb)} lb/session · " +
-            "${lift.failsBeforeDeload} misses → deload"
+        "greyskull" -> "${lift.sets}×${lift.repsLow}, last set AMRAP. +${fmtLb(lift.incrementLb)} lb " +
+            "(double at ${lift.repsLow * 2}+), one miss deloads."
+        "double" -> "${lift.sets}×${lift.repsLow}-${lift.repsHigh}. +${fmtLb(lift.incrementLb)} lb " +
+            "once every set hits ${lift.repsHigh}."
+        else -> "${lift.sets}×${lift.repsLow}. +${fmtLb(lift.incrementLb)} lb a session, " +
+            "${lift.failsBeforeDeload} misses deload."
     }
 
     Column(
         Modifier.fillMaxWidth().padding(top = 8.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(if (neon) 20.dp else 10.dp))
             .background(cellBg)
-            .border(1.dp, cellBorder, RoundedCornerShape(10.dp))
-            .padding(10.dp),
+            .border(if (neon) 0.dp else 1.dp, cellBorder, RoundedCornerShape(10.dp))
+            .padding(if (neon) 14.dp else 10.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(name, color = ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
@@ -454,12 +492,20 @@ private fun ProgramLiftCard(
 
 @Composable
 private fun Section(title: String, neon: Boolean = false) {
-    Text(
-        title.uppercase(),
-        color = if (neon) NeonMV.Muted else MV.OnSurfaceVariant, fontSize = 11.sp,
-        fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp,
-        modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
-    )
+    if (neon) {
+        // Sentence case, ink, no tracked micro-label.
+        Text(
+            title, color = NeonMV.Ink, fontSize = 17.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(top = 22.dp, bottom = 8.dp),
+        )
+    } else {
+        Text(
+            title.uppercase(),
+            color = MV.OnSurfaceVariant, fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp,
+            modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
+        )
+    }
 }
 
 @Composable
@@ -484,22 +530,33 @@ private fun Segmented(
             val label = labelMap[opt] ?: opt
             Box(
                 modifier = Modifier
-                    .weight(1f)
+                    // Width follows the label, so "upper/lower" gets room and
+                    // "2" does not hog it; equal weights cut the long one off.
+                    .weight(label.length.coerceAtLeast(3) + 2f)
                     .height(40.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (on) accent else cellBg)
+                    .clip(RoundedCornerShape(if (neon) 12.dp else 8.dp))
+                    // Neon: flat, selection = cyan text on a low-alpha fill.
+                    .background(
+                        if (on) (if (neon) accent.copy(alpha = 0.14f) else accent) else cellBg,
+                    )
                     .border(
-                        1.dp,
-                        if (on) accent else cellBorder,
+                        if (neon) 0.dp else 1.dp,
+                        if (neon) androidx.compose.ui.graphics.Color.Transparent
+                        else if (on) accent else cellBorder,
                         RoundedCornerShape(8.dp),
                     )
                     .clickable { onSelect(opt) },
                 contentAlignment = Alignment.Center,
             ) {
                 Text(label,
-                    color = if (on) onSel else offText,
+                    color = if (on) (if (neon) accent else onSel) else offText,
                     fontSize = 12.sp,
                     fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                    // One line always: five equal cells are ~60dp each and a
+                    // wrapped label overflowed the 40dp cell.
+                    maxLines = 1, softWrap = false,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 4.dp),
                 )
             }
         }

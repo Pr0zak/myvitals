@@ -37,7 +37,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -167,8 +166,6 @@ internal fun NowMiniBar(
             .heightIn(min = 52.dp)
             .clip(RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp))
             .background(NeonMV.CardHigh)
-            .border(1.dp, NeonMV.Cyan.copy(alpha = 0.35f),
-                RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp))
             .clickable(onClickLabel = "Back to current set", onClick = onClick)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -187,14 +184,20 @@ internal fun NowMiniBar(
 
 @Composable
 private fun HeroEyebrow(text: String, color: Color = NeonMV.Muted, trailing: @Composable () -> Unit = {}) {
+    // The brief's legend idiom: a 3dp bar carries the colour, the label
+    // stays muted sentence case. The tracked ALL-CAPS eyebrow read as
+    // template chrome and coloured the words instead of marking them.
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.size(width = 3.dp, height = 16.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(if (color == NeonMV.Muted) NeonMV.Track else color),
+        )
+        Spacer(Modifier.width(8.dp))
         Text(
-            text.uppercase(),
-            color = color,
-            fontFamily = NeonNumberFamily,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.4.sp,
+            text.replaceFirstChar { it.uppercase() },
+            color = NeonMV.Muted,
+            fontSize = 13.sp,
             modifier = Modifier.weight(1f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -246,6 +249,31 @@ private fun HeroButton(
     }
 }
 
+/** Secondary action: a flat surface, no outline. The hairline outlines made
+ *  Pause and Finish read as two more cards in a screen already full of them. */
+@Composable
+private fun FlatButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    shape: androidx.compose.ui.graphics.Shape = HeroButtonShape,
+    content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        shape = shape,
+        modifier = modifier,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = NeonMV.CardHigh,
+            contentColor = NeonMV.Ink,
+            disabledContainerColor = NeonMV.Card,
+            disabledContentColor = NeonMV.Muted,
+        ),
+        content = content,
+    )
+}
+
 // ── The NOW set ──────────────────────────────────────────────────────────
 
 @Composable
@@ -278,12 +306,12 @@ private fun NowHero(
     var infoOpen by remember(wex.id) { mutableStateOf(false) }
 
     NeonHeroCard(accent = NeonMV.Cyan) {
-        HeroEyebrow("Now · exercise $pos of $total", color = NeonMV.Cyan) {
+        HeroEyebrow("Exercise $pos of $total", color = NeonMV.Cyan) {
             if (wex.supersetId != null) {
                 Text(
-                    "SUPERSET ${wex.supersetId}",
-                    color = NeonMV.Magenta, fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
+                    "Superset ${wex.supersetId}",
+                    color = NeonMV.Magenta, fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(end = 6.dp),
                 )
             }
@@ -423,10 +451,10 @@ private fun SetPills(wex: StrengthWorkoutExerciseRow, n: Int, side: String?) {
     val logged = wex.sets.filter { it.actualReps != null && !it.skipped }
     val last = logged.maxByOrNull { it.setNumber }
     val label = buildString {
-        if (side != null) append(if (side == "R") "Right side · " else "Left side · ")
+        if (side != null) append(if (side == "R") "Right side, " else "Left side, ")
         append("Set $n of ${wex.targetSets}")
         if (last != null) {
-            append(" · set ${last.setNumber}: ")
+            append(", set ${last.setNumber} was ")
             append(last.actualWeightLb?.let { "${fmtLbPlain(it)}×" } ?: "")
             append(last.actualReps)
             last.rating?.let { append(" ${ratingLabel(it)}") }
@@ -510,8 +538,7 @@ private fun SetTypePill(value: String, onChange: (String) -> Unit) {
             Modifier
                 .heightIn(min = 32.dp)
                 .clip(RoundedCornerShape(16.dp))
-                .background(NeonMV.Card)
-                .border(1.dp, NeonMV.Line, RoundedCornerShape(16.dp))
+                .background(NeonMV.CardHigh)
                 .clickable { open = true }
                 .semantics { contentDescription = "Set type" }
                 .padding(horizontal = 10.dp),
@@ -581,8 +608,7 @@ private fun StepPill(label: String, description: String, onClick: () -> Unit) {
         Modifier
             .size(width = 62.dp, height = 40.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(NeonMV.Card)
-            .border(1.dp, NeonMV.Line, RoundedCornerShape(12.dp))
+            .background(NeonMV.CardHigh)
             .clickable(onClick = onClick)
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
@@ -604,14 +630,18 @@ internal fun RatingChips(selected: Int?, onRate: (Int) -> Unit) {
             Box(
                 Modifier
                     .weight(1f)
-                    .height(40.dp)
+                    .height(44.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(if (on) color else color.copy(alpha = 0.08f))
-                    .border(1.dp, if (on) color else color.copy(alpha = 0.40f), RoundedCornerShape(12.dp))
+                    // The label always carries its rating colour so the
+                    // scale reads before a tap; the fill and outline are
+                    // kept for the selected rating, so the screen does not
+                    // show four coloured blocks for one decision.
+                    .background(if (on) color.copy(alpha = 0.20f) else NeonMV.CardHigh)
+                    .then(if (on) Modifier.border(1.5.dp, color, RoundedCornerShape(12.dp)) else Modifier)
                     .clickable { onRate(value) },
                 contentAlignment = Alignment.Center,
             ) {
-                Text(label, color = if (on) NeonMV.OnAccent else color,
+                Text(label, color = color,
                     fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
         }
@@ -652,8 +682,7 @@ private fun SmallPill(label: String, onClick: () -> Unit) {
         Modifier
             .size(width = 64.dp, height = 40.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(NeonMV.Card)
-            .border(1.dp, NeonMV.Line, RoundedCornerShape(12.dp))
+            .background(NeonMV.CardHigh)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -752,7 +781,7 @@ private fun PausedHero(
         val sorted = plan.exercises.sortedBy { it.orderIndex }
         val pos = wex?.let { w -> sorted.indexOfFirst { it.id == w.id } + 1 }
         val total = plan.exercisesTotal.takeIf { it > 0 } ?: plan.exercises.size
-        HeroEyebrow(if (pos != null) "Paused · exercise $pos of $total" else "Paused",
+        HeroEyebrow(if (pos != null) "Paused at exercise $pos of $total" else "Paused",
             color = NeonMV.Cyan)
         HeroTitle(wex?.let { info?.name ?: it.exerciseId.replace('_', ' ') } ?: "Workout paused")
         Text(
@@ -857,7 +886,7 @@ private fun SkippedHero(deferring: Boolean, onUndo: () -> Unit) {
         HeroTitle("Skipped today's workout day.")
         Text("Tomorrow will generate fresh.", color = NeonMV.Muted, fontSize = 13.sp,
             modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
-        OutlinedButton(
+        FlatButton(
             onClick = onUndo, enabled = !deferring, shape = HeroButtonShape,
             modifier = Modifier.fillMaxWidth().height(48.dp),
         ) { Text(if (deferring) "Restoring…" else "Undo", color = NeonMV.Ink) }
@@ -919,7 +948,7 @@ internal fun NoPlanHero(
             HeroTitle("Rest day recommended")
             Text(recoveryReason, color = NeonMV.Muted, fontSize = 13.sp, lineHeight = 18.sp,
                 modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
-            OutlinedButton(
+            FlatButton(
                 onClick = { onGenerate(true) }, enabled = !generating, shape = HeroButtonShape,
                 modifier = Modifier.fillMaxWidth().height(48.dp),
             ) { Text(if (generating) "Generating…" else "Generate anyway", color = NeonMV.Ink) }
@@ -1025,7 +1054,7 @@ internal fun bannerChips(plan: StrengthWorkoutDetail, coach: CoachCardState): Li
     return buildList {
         if (open) {
             val sev = coach.deload?.severity?.takeIf { it != "none" }
-            add(BannerChip("coach", if (sev != null) "Coach · deload $sev" else "Coach",
+            add(BannerChip("coach", if (sev != null) "Coach: deload $sev" else "Coach",
                 Icons.Outlined.Psychology, if (sev != null) NeonMV.Amber else NeonMV.Magenta))
         }
         // FAST-18 — only past the 18h volume-modulation threshold.
@@ -1044,7 +1073,7 @@ internal fun bannerChips(plan: StrengthWorkoutDetail, coach: CoachCardState): Li
         // OG2-D-2 — the generator's notes, behind a disclosure.
         if (plan.exercises.isNotEmpty() && !plan.notes.isNullOrBlank()) {
             val n = plan.notes.trim().lines().count { it.isNotBlank() }
-            add(BannerChip("why", "Why this plan · $n", Icons.Outlined.Info, NeonMV.Muted))
+            add(BannerChip("why", "Why this plan ($n)", Icons.Outlined.Info, NeonMV.Muted))
         }
     }
 }
@@ -1066,15 +1095,16 @@ internal fun BannerChipStrip(
                 Modifier
                     .heightIn(min = 36.dp)
                     .clip(RoundedCornerShape(18.dp))
-                    .background(c.tint.copy(alpha = 0.12f))
-                    .border(1.dp, c.tint.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
+                    // Neutral pill, tinted icon. Amber stays a real signal
+                    // (fasting, a deload call) and is the only tinted fill.
+                    .background(if (c.tint == NeonMV.Amber) NeonMV.Amber.copy(alpha = 0.12f) else NeonMV.CardHigh)
                     .clickable { onOpen(c.key) }
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(c.icon, contentDescription = null, tint = c.tint, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text(c.label, color = if (c.tint == NeonMV.Muted) NeonMV.Ink else c.tint,
+                Text(c.label, color = if (c.tint == NeonMV.Amber) NeonMV.Amber else NeonMV.Ink,
                     fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             }
         }
@@ -1095,14 +1125,14 @@ internal fun SessionActions(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (plan.status == "paused") {
-            OutlinedButton(
+            FlatButton(
                 onClick = onResume, shape = HeroButtonShape,
                 modifier = Modifier.weight(1f).height(48.dp),
             ) { Text("Resume workout", color = NeonMV.Cyan) }
         } else {
             // WP-14 — Pause, for sessions already underway.
             if (plan.setsDone > 0 || plan.status == "in_progress") {
-                OutlinedButton(
+                FlatButton(
                     onClick = onPause, shape = HeroButtonShape,
                     modifier = Modifier.weight(1f).height(48.dp),
                 ) { Text("Pause", color = NeonMV.Ink) }
@@ -1110,10 +1140,10 @@ internal fun SessionActions(
             // SKIP-1: no "you haven't logged anything" gate — finishing a
             // session you walked away from is the flagship flow, and the
             // confirmation names what it will close.
-            OutlinedButton(
+            FlatButton(
                 onClick = onFinish, enabled = !finishing, shape = HeroButtonShape,
                 modifier = Modifier.weight(1f).height(48.dp),
-            ) { Text(if (finishing) "Finishing…" else "Finish workout", color = NeonMV.Lime) }
+            ) { Text(if (finishing) "Finishing…" else "Finish workout", color = NeonMV.Cyan) }
         }
     }
 }

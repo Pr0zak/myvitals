@@ -209,6 +209,9 @@ internal class StrengthTodayState {
     /** UI-2 — an up-next slot the user tapped to log out of order. Falls
      *  back to the NOW slot the moment it closes. */
     var focusWexId by mutableStateOf<Long?>(null)
+    /** The set that was just logged, for the set-complete animation. Cleared
+     *  by the animation itself after its hold, or by a tap. */
+    var setDone by mutableStateOf<SetDoneEvent?>(null)
     val expandedDone = mutableStateMapOf<Long, Boolean>()
     var restEndsAt by mutableLongStateOf(0L)
     var restTotal by mutableLongStateOf(0L)
@@ -430,7 +433,19 @@ fun StrengthTodayScreen(
     LaunchedEffect(restRemaining, st.restEndsAt) {
         if (st.restEndsAt > 0L && restRemaining <= 0L && st.restEndsAt != lastNotifiedFor) {
             lastNotifiedFor = st.restEndsAt
-            Notifier.postRestTimerDone(context, (st.restTotal / 1000).toInt())
+            // Name the next exercise when it is a different one — the
+            // notification is what you read with the phone face-down.
+            val plan = st.workout
+            val next = plan?.takeIf { it.status != "completed" && it.status != "skipped" }?.let { p ->
+                val ordered = orderExercises(p, false)
+                val curId = ordered.firstOrNull { !isSlotClosed(it, p.status) }?.id
+                p.exercises.firstOrNull { it.id == st.focusWexId && !isSlotClosed(it, p.status) }
+                    ?: p.exercises.firstOrNull { it.id == curId }
+            }
+            val switchTo = if (plan != null && next != null && switchingFrom(plan, next) != null)
+                st.catalog[next.exerciseId]?.name ?: next.exerciseId.replace('_', ' ')
+            else null
+            Notifier.postRestTimerDone(context, (st.restTotal / 1000).toInt(), switchTo)
         }
     }
     // WP-14 — keep the ongoing "workout paused" notification in sync.
@@ -557,6 +572,21 @@ fun StrengthTodayScreen(
                         else -> "personal"
                     }
                     Toast.makeText(context, "\uD83C\uDFC6 New $what PR!", Toast.LENGTH_SHORT).show()
+                }
+                if (logged != null && st.editingSetKey == null) {
+                    val others = wex.sets.count { it.setNumber != setNum }
+                    st.setDone = SetDoneEvent(
+                        wexId = wex.id,
+                        setNum = setNum,
+                        totalSets = wex.targetSets,
+                        name = st.catalog[wex.exerciseId]?.name ?: wex.exerciseId.replace('_', ' '),
+                        summary = buildString {
+                            if (weight != null) append("${fmtLbPlain(weight)} × ")
+                            if (reps != null) append(reps)
+                            if (rating != null) append(" · ${ratingLabel(rating)}")
+                        },
+                        exerciseDone = others + 1 >= wex.targetSets,
+                    )
                 }
                 if (logged != null) {
                     // OG2-A9: a correction closes its own editor.

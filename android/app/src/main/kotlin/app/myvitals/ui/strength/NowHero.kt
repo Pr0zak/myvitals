@@ -44,6 +44,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -126,7 +128,128 @@ internal fun NowHeroArea(
             onFinish = onFinish,
             onAdd = { st.addSheetOpen = true },
         )
-        else -> NowHero(st, plan, heroWex, info, actions, backendBaseUrl)
+        else -> {
+            val ev = st.setDone
+            val nextName = info?.name ?: heroWex.exerciseId.replace('_', ' ')
+            // Set-complete feedback. The LAST set of an exercise turns the
+            // whole card into the hand-off ("Bench complete → Switch to Row")
+            // because that moment is the one that went unnoticed; an ordinary
+            // set gets a short banner. Both clear themselves or on a tap.
+            val dismiss = { st.setDone = null }
+            val handOff = ev != null && ev.exerciseDone && ev.wexId != heroWex.id
+            if (ev != null) {
+                // Keyed on handOff too: the set is logged before the plan
+                // reloads, so the hero only moves to the next exercise once
+                // the reload lands. The takeover's hold starts THEN, or slow
+                // gym wifi would eat most of it.
+                LaunchedEffect(ev, handOff) {
+                    // A finished exercise waits (up to 8 s) for the reload
+                    // rather than timing out before the takeover can show.
+                    kotlinx.coroutines.delay(when {
+                        handOff -> 2_200L
+                        ev.exerciseDone -> 8_000L
+                        else -> 1_300L
+                    })
+                    if (st.setDone === ev) st.setDone = null
+                }
+            }
+            Box {
+                if (handOff) {
+                    ExerciseDoneTakeover(ev!!, nextName, dismiss)
+                } else {
+                    NowHero(st, plan, heroWex, info, actions, backendBaseUrl)
+                    if (ev != null) {
+                        SlideDoneBanner(ev, nextName.takeIf { ev.wexId != heroWex.id }, dismiss)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A set the user just logged — what the set-complete animation shows. */
+internal data class SetDoneEvent(
+    val wexId: Long,
+    val setNum: Int,
+    val totalSets: Int,
+    val name: String,
+    val summary: String,
+    val exerciseDone: Boolean,
+    val atMs: Long = System.currentTimeMillis(),
+)
+
+/** An ordinary logged set: a lime bar slides down over the top of the card. */
+@Composable
+private fun SlideDoneBanner(ev: SetDoneEvent, nextName: String?, onTap: () -> Unit) {
+    val offset = remember(ev) { androidx.compose.animation.core.Animatable(-1f) }
+    LaunchedEffect(ev) {
+        offset.animateTo(0f, androidx.compose.animation.core.tween(220))
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .graphicsLayer { translationY = offset.value * size.height; alpha = 1f + offset.value }
+            .clip(RoundedCornerShape(16.dp))
+            .background(NeonMV.Lime)
+            .clickable(onClickLabel = "Dismiss", onClick = onTap)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.Check, contentDescription = null, tint = NeonMV.OnAccent,
+            modifier = Modifier.size(28.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                if (ev.exerciseDone) "${ev.name} complete" else "Set ${ev.setNum} of ${ev.totalSets} logged",
+                color = NeonMV.OnAccent, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                if (nextName != null) "Up next: $nextName" else ev.summary,
+                color = NeonMV.OnAccent, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** The LAST set of an exercise: the card itself becomes the hand-off —
+ *  what you finished, then the next exercise, big. */
+@Composable
+private fun ExerciseDoneTakeover(ev: SetDoneEvent, nextName: String, onTap: () -> Unit) {
+    val scale = remember(ev) { androidx.compose.animation.core.Animatable(0.4f) }
+    LaunchedEffect(ev) {
+        scale.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.5f, stiffness = 380f))
+    }
+    NeonHeroCard(accent = NeonMV.Lime) {
+        Column(
+            Modifier.fillMaxWidth().clickable(onClickLabel = "Continue", onClick = onTap)
+                .padding(vertical = 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                Modifier.size(72.dp)
+                    .graphicsLayer { scaleX = scale.value; scaleY = scale.value }
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(NeonMV.Lime),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Outlined.Check, contentDescription = null, tint = NeonMV.OnAccent,
+                    modifier = Modifier.size(44.dp))
+            }
+            Spacer(Modifier.height(10.dp))
+            Text("${ev.name} complete", color = NeonMV.Lime, fontSize = 18.sp,
+                fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(18.dp))
+            Icon(Icons.Filled.SwapHoriz, contentDescription = null, tint = NeonMV.Muted,
+                modifier = Modifier.size(24.dp))
+            Spacer(Modifier.height(6.dp))
+            Text("Switch to", color = NeonMV.Muted, fontSize = 14.sp)
+            Text(nextName, color = NeonMV.Ink, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold,
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            Spacer(Modifier.height(14.dp))
+            Text("Tap to continue", color = NeonMV.Muted, fontSize = 12.sp)
+        }
     }
 }
 
@@ -135,6 +258,31 @@ internal fun NowHeroArea(
 internal fun heroIsNow(plan: StrengthWorkoutDetail): Boolean =
     plan.status != "completed" && plan.status != "skipped" &&
         plan.status != "paused" && plan.exercises.isNotEmpty()
+
+/**
+ * The exercise the user is switching AWAY from: the slot holding the most
+ * recently logged (or skipped) set, when that is not [wex]. Null means the
+ * next set is on the same exercise as the last one — or nothing is logged
+ * yet. Ordered by set id, which the server assigns in insert order; the
+ * phone never fabricates set rows offline, so every id is a real one.
+ *
+ * Stateless on purpose: the cue holds until the first set of the new
+ * exercise is logged, through the rest and through a scroll away. A
+ * transient flash was the failure mode reported — the swap happened while
+ * nobody was looking and the next set went on the old exercise. Supersets
+ * get the same cue on every alternation, which is exactly when the wrong
+ * lift is easiest to repeat.
+ */
+internal fun switchingFrom(
+    plan: StrengthWorkoutDetail,
+    wex: StrengthWorkoutExerciseRow,
+): StrengthWorkoutExerciseRow? {
+    val last = plan.exercises
+        .flatMap { e -> e.sets.map { e to it.id } }
+        .maxByOrNull { it.second }
+        ?.first ?: return null
+    return last.takeIf { it.id != wex.id }
+}
 
 /**
  * The one-line stand-in for the hero once it has scrolled off: which
@@ -152,6 +300,7 @@ internal fun NowMiniBar(
     val n = nextSetOf(wex) ?: return
     val name = info?.name ?: wex.exerciseId.replace('_', ' ')
     val resting = st.restTotal > 0L && st.restRemainingS > 0L
+    val switching = st.workout?.let { switchingFrom(it, wex) } != null
     val value = when {
         resting -> "Rest ${mmss(st.restRemainingS)}"
         isTimedExercise(wex, info) -> "${wex.targetRepsLow}s hold"
@@ -170,8 +319,12 @@ internal fun NowMiniBar(
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(8.dp).clip(RoundedCornerShape(4.dp)).background(NeonMV.Cyan))
+        Box(Modifier.size(8.dp).clip(RoundedCornerShape(4.dp))
+            .background(if (switching) NeonMV.Lime else NeonMV.Cyan))
         Spacer(Modifier.width(10.dp))
+        if (switching) {
+            Text("New: ", color = NeonMV.Lime, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        }
         Text(name, color = NeonMV.Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         Text("  Set $n of ${wex.targetSets}  ", color = NeonMV.Muted, fontSize = 12.sp, maxLines = 1)
@@ -304,9 +457,27 @@ private fun NowHero(
     val targetW = planned?.targetWeightLb ?: wex.targetWeightLb
     var editOpen by remember(key) { mutableStateOf(false) }
     var infoOpen by remember(wex.id) { mutableStateOf(false) }
+    val from = switchingFrom(plan, wex)
+    val fromName = from?.let { st.catalog[it.exerciseId]?.name ?: it.exerciseId.replace('_', ' ') }
+    // A tactile tick the moment the hero changes exercise, so the switch is
+    // felt even when the screen is not being watched. Keyed on the slot, and
+    // only when a switch is pending — not on the first exercise of the day.
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    androidx.compose.runtime.LaunchedEffect(wex.id) {
+        if (from != null) {
+            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+        }
+    }
 
-    NeonHeroCard(accent = NeonMV.Cyan) {
-        HeroEyebrow("Exercise $pos of $total", color = NeonMV.Cyan) {
+    NeonHeroCard(accent = if (from != null) NeonMV.Lime else NeonMV.Cyan) {
+        if (from != null && fromName != null) {
+            SwitchBanner(
+                superset = wex.supersetId != null && wex.supersetId == from.supersetId,
+                fromName = fromName,
+            )
+            Spacer(Modifier.height(10.dp))
+        }
+        HeroEyebrow("Exercise $pos of $total", color = if (from != null) NeonMV.Lime else NeonMV.Cyan) {
             if (wex.supersetId != null) {
                 Text(
                     "Superset ${wex.supersetId}",
@@ -339,7 +510,7 @@ private fun NowHero(
         val resting = st.restTotal > 0L && st.restRemainingS > 0L
         if (timed) {
             if (resting) {
-                RestRingRow(st, nextLabel = "${wex.targetRepsLow}s hold")
+                RestRingRow(st, nextLabel = "${wex.targetRepsLow}s hold", nextExercise = name.takeIf { from != null })
                 Spacer(Modifier.height(10.dp))
             }
             // The countdown, its full-screen overlay and the Easy/Good/Failed
@@ -362,7 +533,8 @@ private fun NowHero(
         }
 
         if (resting) {
-            RestRingRow(st, nextLabel = "${input.weight.ifBlank { "BW" }} lb × ${input.reps}")
+            RestRingRow(st, nextLabel = "${input.weight.ifBlank { "BW" }} lb × ${input.reps}",
+                nextExercise = name.takeIf { from != null })
         } else {
             TargetReadout(input.weight, input.reps, onTap = { editOpen = true })
             Spacer(Modifier.height(8.dp))
@@ -437,6 +609,39 @@ private fun NowHero(
                 editOpen = false
             },
         )
+    }
+}
+
+/**
+ * The exercise-change cue at the top of the hero. A lime fill, not a muted
+ * eyebrow: the complaint it answers is that the swap went unnoticed and the
+ * old exercise got another set, so it has to win a glance from across the
+ * room. It names the exercise being LEFT, because "new exercise" alone does
+ * not tell you that the thing in your hands is the wrong one.
+ */
+@Composable
+private fun SwitchBanner(superset: Boolean, fromName: String) {
+    val title = if (superset) "Switch exercise" else "New exercise"
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(NeonMV.Lime.copy(alpha = 0.16f))
+            .border(1.5.dp, NeonMV.Lime, RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .semantics { contentDescription = "$title, done with $fromName" },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.SwapHoriz, contentDescription = null, tint = NeonMV.Lime,
+            modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = NeonMV.Lime, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+            Text(
+                (if (superset) "Superset — last set was " else "Done with ") + fromName,
+                color = NeonMV.Ink, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -650,7 +855,7 @@ internal fun RatingChips(selected: Int?, onRate: (Int) -> Unit) {
 
 /** The rest timer, inside the hero: a depleting ring around mm:ss. */
 @Composable
-private fun RestRingRow(st: StrengthTodayState, nextLabel: String) {
+private fun RestRingRow(st: StrengthTodayState, nextLabel: String, nextExercise: String? = null) {
     val remaining = st.restRemainingS
     val totalS = st.restTotal / 1000
     val frac = if (totalS > 0) remaining.toFloat() / totalS else 0f
@@ -664,8 +869,16 @@ private fun RestRingRow(st: StrengthTodayState, nextLabel: String) {
             Text("Resting", color = NeonMV.Cyan, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Text("of ${mmss(totalS)}", color = NeonMV.Muted, fontSize = 12.sp)
             Spacer(Modifier.height(4.dp))
-            Text("Next: $nextLabel", color = NeonMV.Ink, fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (nextExercise != null) {
+                // Switching exercise: the next thing to pick up is a different
+                // implement, so the name leads, not the load.
+                Text("Next: $nextExercise", color = NeonMV.Lime, fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(nextLabel, color = NeonMV.Ink, fontSize = 13.sp, maxLines = 1)
+            } else {
+                Text("Next: $nextLabel", color = NeonMV.Ink, fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             SmallPill("+30s") { st.restEndsAt += 30_000 }

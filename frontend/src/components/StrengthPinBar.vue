@@ -11,6 +11,7 @@ defineProps<{
   setLabel: string;          // "Set 2 of 4"
   value: string;             // "25 × 10" / "BW × 12" / "40s hold"
   rest: string | null;       // "Rest 0:52" while the rest timer runs
+  switching?: boolean;       // the next set is on a different exercise
 }>();
 defineEmits<{ (e: "back"): void }>();
 </script>
@@ -22,8 +23,8 @@ defineEmits<{ (e: "back"): void }>();
     <Transition name="pin">
       <button v-if="show" type="button" class="pin-bar" aria-label="Back to current set"
               @click="$emit('back')">
-        <span class="dot" aria-hidden="true" />
-        <span class="name">{{ name }}</span>
+        <span class="dot" :class="{ sw: switching }" aria-hidden="true" />
+        <span class="name"><b v-if="switching" class="new">New: </b>{{ name }}</span>
         <span class="set">{{ setLabel }}</span>
         <span v-if="rest" class="val rest">{{ rest }}</span>
         <span v-else class="val">{{ value }}</span>
@@ -54,6 +55,8 @@ defineEmits<{ (e: "back"): void }>();
 .val { flex: none; white-space: nowrap; font-family: 'Space Grotesk', monospace; font-weight: 700;
   font-variant-numeric: tabular-nums; }
 .val.rest { color: var(--rn-cyan, #28e6ff); }
+.dot.sw { background: var(--rn-lime, #5dff3b); box-shadow: 0 0 8px var(--rn-lime, #5dff3b); }
+.new { color: var(--rn-lime, #5dff3b); }
 .chev { flex: none; color: var(--rn-mut, #9b9bb0); }
 
 .pin-enter-active, .pin-leave-active { transition: transform .18s ease, opacity .18s ease; }

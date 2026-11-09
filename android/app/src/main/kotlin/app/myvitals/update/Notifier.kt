@@ -216,7 +216,7 @@ object Notifier {
     }
 
     /** Briefly vibrate + post a heads-up notification when rest hits 0. */
-    fun postRestTimerDone(context: Context, secondsRested: Int) {
+    fun postRestTimerDone(context: Context, secondsRested: Int, switchTo: String? = null) {
         ensureChannel(context)
         // Vibrate explicitly — heads-up channel will vibrate on its own but
         // this also fires when the channel is muted
@@ -252,8 +252,11 @@ object Notifier {
 
         val notif = NotificationCompat.Builder(context, REST_TIMER_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_rest_timer)
-            .setContentTitle("Rest done")
-            .setContentText("${secondsRested}s rest complete — start your next set.")
+            .setContentTitle(if (switchTo != null) "Rest done — new exercise" else "Rest done")
+            .setContentText(
+                if (switchTo != null) "Switch to $switchTo."
+                else "${secondsRested}s rest complete — start your next set.",
+            )
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setAutoCancel(true)

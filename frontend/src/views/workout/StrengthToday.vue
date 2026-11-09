@@ -11,7 +11,7 @@ import BodyMap from "@/components/BodyMap.vue";
 import { useRouter } from "vue-router";
 import {
   Play, Pause, RotateCw, Plus, Minus, Check, MoreVertical, Sparkles, Hourglass,
-  Feather, Info, ChevronDown, ChevronRight,
+  Feather, Info, ChevronDown, ChevronRight, ArrowLeftRight,
 } from "lucide-vue-next";
 import NeonPage from "@/components/neon/NeonPage.vue";
 import NeonHero from "@/components/neon/NeonHero.vue";
@@ -330,10 +330,13 @@ function chime() {
   } catch (_) { /* audio context blocked */ }
 }
 
-function notifyDone(seconds: number) {
+function notifyDone(seconds: number, switchTo: string | null = null) {
   if (!("Notification" in window)) return;
   if (Notification.permission === "granted") {
-    new Notification("Rest done", { body: `${seconds}s rest complete — start your next set.`, silent: false });
+    new Notification(switchTo ? "Rest done — new exercise" : "Rest done", {
+      body: switchTo ? `Switch to ${switchTo}.` : `${seconds}s rest complete — start your next set.`,
+      silent: false,
+    });
   } else if (Notification.permission !== "denied") {
     Notification.requestPermission(); // permission ask only fires once
   }
@@ -358,7 +361,7 @@ function tickRest() {
   if (left <= 0 && restEndsAt !== lastNotifiedFor) {
     lastNotifiedFor = restEndsAt;
     chime();
-    notifyDone(restTotal.value);
+    notifyDone(restTotal.value, switchedFrom.value && heroWex.value ? exName(heroWex.value.exercise_id) : null);
     // Vibrate (Android Chrome only)
     if ("vibrate" in navigator) navigator.vibrate([200, 80, 200]);
     // UI-2: the ring stays on "Rest complete" (Lime) until the next set is
@@ -1173,8 +1176,10 @@ async function logSet(wex: StrengthWorkoutExercise, setNum: number, skipped = fa
     // A correction closes its own editor. The server returns rest_after_s=0
     // for one, so the branch above is already silent — a typo does not earn
     // a rest and does not re-fire a PR badge.
+    const wasEdit = editingSet.value != null;
     cancelEdit();
     await loadAll();
+    if (!wasEdit) showSetDone(wex, setNum, skipped, e);
     // Flash the 🏆 badge only after loadAll() flips the row to logged (its
     // v-else branch), so the 5s window starts when the badge is actually
     // visible — not before, which on slow gym wifi could expire unseen.
@@ -1509,6 +1514,61 @@ const heroPos = computed(() => {
 const heroOf = computed(() =>
   workout.value?.exercises_total || workout.value?.exercises.length || 0,
 );
+/** Set-complete feedback, mirroring the phone. The LAST set of an exercise
+ *  turns the card into the hand-off ("Bench complete → Switch to Row"),
+ *  because that moment is the one that went unnoticed; an ordinary set gets
+ *  a short banner. Both clear themselves after a hold, or on a click. */
+interface SetDoneEvent {
+  wexId: number; setNum: number; totalSets: number; name: string;
+  summary: string; exerciseDone: boolean;
+}
+const setDone = ref<SetDoneEvent | null>(null);
+let setDoneTimer: number | undefined;
+function showSetDone(wex: StrengthWorkoutExercise, setNum: number, skipped: boolean, e: SetEntry) {
+  if (skipped) return;
+  const others = (wex.sets ?? []).filter((x) => x.set_number !== setNum).length;
+  const rating = RATING_CHOICES.find((r) => r.v === e.rating)?.label;
+  const w = e.weight.trim(); const r = e.reps.trim();
+  const ev: SetDoneEvent = {
+    wexId: wex.id, setNum, totalSets: wex.target_sets, name: exName(wex.exercise_id),
+    summary: [w && r ? `${w} × ${r}` : r, rating].filter(Boolean).join(" · "),
+    exerciseDone: others + 1 >= wex.target_sets,
+  };
+  setDone.value = ev;
+  window.clearTimeout(setDoneTimer);
+  setDoneTimer = window.setTimeout(() => {
+    if (setDone.value === ev) setDone.value = null;
+  }, ev.exerciseDone ? 2200 : 1300);
+}
+const setDoneHandOff = computed(() =>
+  !!setDone.value && setDone.value.exerciseDone && !!heroWex.value
+  && setDone.value.wexId !== heroWex.value.id,
+);
+/** The slot the user is switching AWAY from: the one holding the most
+ *  recently logged (or skipped) set, when it is not the hero. Mirrors the
+ *  phone's `switchingFrom`. Ordered by set id (server insert order). Stateless
+ *  so the cue holds through the rest until the new exercise's first set is
+ *  logged — the reported failure was a swap nobody noticed and another set
+ *  on the old exercise. Supersets cue on every alternation. */
+const switchedFrom = computed<StrengthWorkoutExercise | null>(() => {
+  const w = heroWex.value;
+  if (!w || !workout.value) return null;
+  let last: StrengthWorkoutExercise | null = null;
+  let lastId = -Infinity;
+  for (const x of workout.value.exercises) {
+    for (const st of x.sets ?? []) if (st.id > lastId) { lastId = st.id; last = x; }
+  }
+  return last && last.id !== w.id ? last : null;
+});
+const switchIsSuperset = computed(() =>
+  !!heroWex.value?.superset_id && heroWex.value.superset_id === switchedFrom.value?.superset_id,
+);
+// A buzz when the hero changes exercise (Android Chrome only).
+watch(() => heroWex.value?.id, (now, prev) => {
+  if (prev != null && now != null && now !== prev && switchedFrom.value) {
+    try { navigator.vibrate?.([120, 60, 120]); } catch { /* no-op */ }
+  }
+});
 function focusExercise(wex: StrengthWorkoutExercise) {
   focusWexId.value = wex.id;
   heroEditing.value = false;
@@ -1935,6 +1995,7 @@ useVisibilityRefresh(loadAll);
         :set-label="`Set ${heroSet} of ${heroWex.target_sets}`"
         :value="pinBarValue"
         :rest="pinBarRest"
+        :switching="!!switchedFrom"
         @back="scrollToHero" />
       <NeonHero v-if="workout.status === 'skipped'" accent="#9b9bb0" class="hero">
         <div class="eyebrow">Skipped</div>
@@ -1997,10 +2058,39 @@ useVisibilityRefresh(loadAll);
         </button>
       </NeonHero>
 
+      <NeonHero v-else-if="heroWex && setDoneHandOff && setDone" :accent="LIME"
+                class="hero handoff" role="status" @click="setDone = null">
+        <div class="handoff-check" aria-hidden="true"><Check :size="44" /></div>
+        <div class="handoff-done">{{ setDone.name }} complete</div>
+        <ArrowLeftRight class="handoff-icon" :size="24" aria-hidden="true" />
+        <div class="handoff-label">Switch to</div>
+        <div class="handoff-next">{{ exName(heroWex.exercise_id) }}</div>
+        <div class="handoff-hint">Click to continue</div>
+      </NeonHero>
       <NeonHero v-else-if="heroWex && heroSet != null && heroEntry" ref="nowHeroRef"
-                :accent="CYAN" class="hero now-hero">
+                :accent="switchedFrom ? LIME : CYAN" class="hero now-hero">
+        <Transition name="setdone" appear>
+          <button v-if="setDone && !setDoneHandOff" :key="`${setDone.wexId}-${setDone.setNum}`"
+                  type="button" class="setdone-bar" role="status" @click="setDone = null">
+            <Check :size="26" aria-hidden="true" />
+            <span>
+              <b>{{ setDone.exerciseDone ? `${setDone.name} complete` : `Set ${setDone.setNum} of ${setDone.totalSets} logged` }}</b>
+              <small>{{ setDone.wexId !== heroWex.id ? `Up next: ${exName(heroWex.exercise_id)}` : setDone.summary }}</small>
+            </span>
+          </button>
+        </Transition>
+        <!-- Exercise-change cue: names the exercise being LEFT, because
+             "new exercise" alone does not say the thing in your hands is
+             the wrong one. Same as the phone's SwitchBanner. -->
+        <div v-if="switchedFrom" class="switch-banner" role="status">
+          <ArrowLeftRight :size="20" aria-hidden="true" />
+          <div>
+            <b>{{ switchIsSuperset ? 'Switch exercise' : 'New exercise' }}</b>
+            <span>{{ switchIsSuperset ? 'Superset — last set was ' : 'Done with ' }}{{ exName(switchedFrom.exercise_id) }}</span>
+          </div>
+        </div>
         <div class="hero-top">
-          <div class="eyebrow cyan">Exercise {{ heroPos }} of {{ heroOf }}</div>
+          <div class="eyebrow" :class="switchedFrom ? 'lime' : 'cyan'">Exercise {{ heroPos }} of {{ heroOf }}</div>
           <select v-if="!isTimedExercise(heroWex)" v-model="heroEntry.setType"
                   class="type-sel" aria-label="Set type">
             <option value="working">work</option>
@@ -2072,8 +2162,11 @@ useVisibilityRefresh(loadAll);
               <div class="rest-state" :class="restDone ? 'lime' : 'cyan'">
                 {{ restDone ? 'Rest complete' : 'Resting' }}
               </div>
+              <div v-if="switchedFrom" class="rest-next switch">
+                Next: <b>{{ exName(heroWex.exercise_id) }}</b>
+              </div>
               <div class="rest-next">
-                Next: {{ heroEntry.weight || '—' }} lb × {{ heroEntry.reps || '—' }}
+                {{ switchedFrom ? '' : 'Next: ' }}{{ heroEntry.weight || '—' }} lb × {{ heroEntry.reps || '—' }}
               </div>
               <div class="rest-actions">
                 <button v-if="!restDone" class="pill" @click="addRest(30)">+30s</button>
@@ -2744,6 +2837,40 @@ useVisibilityRefresh(loadAll);
   color: var(--rn-ink); overflow-wrap: anywhere; }
 .now-sub { font-size: 13px; color: var(--rn-mut); }
 .now-ss { font-size: 12px; font-weight: 600; margin-top: 3px; }
+.now-hero { position: relative; }
+.setdone-bar { position: absolute; top: 0; left: 0; right: 0; z-index: 5;
+  display: flex; align-items: center; gap: 12px; padding: 14px 16px; border: 0;
+  border-radius: 16px; background: var(--rn-lime); color: #06121a; text-align: left;
+  font: inherit; cursor: pointer; }
+.setdone-bar span { display: flex; flex-direction: column; min-width: 0; }
+.setdone-bar b { font-size: 17px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.setdone-bar small { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.setdone-enter-active { transition: transform .22s ease, opacity .22s ease; }
+.setdone-leave-active { transition: opacity .18s ease; }
+.setdone-enter-from { transform: translateY(-100%); opacity: 0; }
+.setdone-leave-to { opacity: 0; }
+.handoff { display: flex; flex-direction: column; align-items: center; text-align: center;
+  padding-top: 18px; padding-bottom: 18px; cursor: pointer; }
+.handoff-check { width: 72px; height: 72px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--rn-lime); color: #06121a; animation: handoff-pop .45s cubic-bezier(.34,1.56,.64,1); }
+.handoff-done { margin-top: 10px; color: var(--rn-lime); font-size: 18px; font-weight: 700; }
+.handoff-icon { margin-top: 18px; color: var(--rn-mut); }
+.handoff-label { margin-top: 6px; color: var(--rn-mut); font-size: 14px; }
+.handoff-next { color: var(--rn-ink); font-size: 26px; font-weight: 800; line-height: 1.2; }
+.handoff-hint { margin-top: 14px; color: var(--rn-mut); font-size: 12px; }
+@keyframes handoff-pop { from { transform: scale(.4); } to { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .handoff-check { animation: none; }
+  .setdone-enter-active, .setdone-leave-active { transition: none; }
+}
+.switch-banner { display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+  padding: 10px 12px; border-radius: 12px; color: var(--rn-lime);
+  background: color-mix(in srgb, var(--rn-lime) 16%, transparent);
+  border: 1.5px solid var(--rn-lime); }
+.switch-banner > div { display: flex; flex-direction: column; min-width: 0; }
+.switch-banner b { font-size: 16px; font-weight: 800; }
+.switch-banner span { font-size: 13px; color: var(--rn-ink); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
 .now-title { display: flex; align-items: center; gap: 12px; margin-top: 6px; min-width: 0; }
 .now-title .now-name { margin: 0 0 2px; }
 .now-title-text { flex: 1; min-width: 0; }
@@ -2828,6 +2955,7 @@ useVisibilityRefresh(loadAll);
 .rest-body { flex: 1; min-width: 0; }
 .rest-state { font-size: 16px; font-weight: 800; }
 .rest-next { font-size: 13px; color: var(--rn-mut); margin-top: 2px; font-family: 'Space Grotesk', monospace; }
+.rest-next.switch { color: var(--rn-lime); font-family: inherit; font-size: 14px; }
 .rest-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 
 /* Completed tiles */

@@ -1082,6 +1082,7 @@ def _planned_sets(
     sets: list[models.StrengthSet],
     last_sets: list[LastSetOut] | None,
     program: dict | None,
+    untargeted_anchor: float | None = None,
 ) -> list[PlannedSetOut]:
     """Expand a slot's flat prescription into one row per set.
 
@@ -1119,7 +1120,10 @@ def _planned_sets(
         # riskier change that should not ride along with a prefill fix.
         set_type = "working"
 
-        prefill_weight = wex.target_weight_lb
+        # A loaded slot with no target starts from last time's weight (see
+        # `_untargeted_anchor`); with a target this is None and changes nothing.
+        prefill_weight = wex.target_weight_lb if wex.target_weight_lb is not None \
+            else untargeted_anchor
         prefill_reps = wex.target_reps_low
         prior = logged_by_number.get(n)
         if prior is not None:
@@ -1165,21 +1169,61 @@ def _planned_sets(
     return out
 
 
+def _is_loaded(meta: dict[str, Any] | None) -> bool:
+    """A dumbbell exercise that is not a timed hold — one that carries a
+    weight whether or not the slot was given a target."""
+    return bool(
+        meta is not None and not meta.get("is_timed")
+        and "dumbbell" in (meta.get("equipment") or [])
+    )
+
+
+def _untargeted_anchor(
+    wex: models.StrengthWorkoutExercise,
+    meta: dict[str, Any] | None,
+    last_sets: list[LastSetOut] | None,
+) -> float | None:
+    """The weight to start from on a LOADED slot that has no target: the
+    heaviest working set the last time this exercise was done.
+
+    A slot can reach the client with no target — finishers were generated
+    that way until v0.54.1, and every one of them already in the database
+    still is. Without an anchor the card read "BW" for a dumbbell lift and
+    had no weight stepper at all, while the "Last" line beside it said
+    25 lb. Only ever used when there is no target, so it cannot undo a
+    prescription (the reason `_planned_sets` has no last-session tier).
+    """
+    if wex.target_weight_lb is not None or not _is_loaded(meta):
+        return None
+    weights = [ls.weight_lb for ls in (last_sets or []) if ls.weight_lb]
+    return max(weights) if weights else None
+
+
 def _load_ladder_for(
     wex: models.StrengthWorkoutExercise,
     meta: dict[str, Any] | None,
     pairs_lb: list[float] | None,
     wrist_lb: list[float] | None,
+    last_sets: list[LastSetOut] | None = None,
 ) -> list[float] | None:
     """UI-F4: the stepper ladder for one slot, or None when the slot carries
-    no dumbbell load (bodyweight, timed hold, unknown to the catalog)."""
-    if meta is None or meta.get("is_timed"):
+    no dumbbell load (bodyweight, timed hold, unknown to the catalog).
+
+    A loaded slot with no target still gets a ladder — centred on last
+    time's weight, or the whole rack when there is no history — because a
+    dumbbell exercise without a weight stepper is a dumbbell exercise you
+    cannot log honestly."""
+    if not _is_loaded(meta):
         return None
-    if "dumbbell" not in (meta.get("equipment") or []):
-        return None
-    return strength_algo.load_ladder(
-        wex.target_weight_lb, pairs_lb or [], wrist_lb or [],
-    )
+    if wex.target_weight_lb is not None:
+        return strength_algo.load_ladder(
+            wex.target_weight_lb, pairs_lb or [], wrist_lb or [],
+        )
+    anchor = _untargeted_anchor(wex, meta, last_sets)
+    if anchor is not None:
+        return strength_algo.load_ladder(anchor, pairs_lb or [], wrist_lb or [])
+    full = strength_algo.valid_dumbbell_loads(pairs_lb or [], wrist_lb or [])
+    return list(full) or None
 
 
 def _wex_to_out(
@@ -1220,8 +1264,11 @@ def _wex_to_out(
         skipped=bool(wex.skipped),
         added_ad_hoc=bool(getattr(wex, "added_ad_hoc", False)),
         equipment_missing=missing_kit,
-        load_ladder_lb=_load_ladder_for(wex, meta, pairs_lb, wrist_lb),
-        planned_sets=_planned_sets(wex, sets, last_sets, prog),
+        load_ladder_lb=_load_ladder_for(wex, meta, pairs_lb, wrist_lb, last_sets),
+        planned_sets=_planned_sets(
+            wex, sets, last_sets, prog,
+            untargeted_anchor=_untargeted_anchor(wex, meta, last_sets),
+        ),
         sets=[_set_to_out(s) for s in sorted(sets, key=lambda x: x.set_number)],
     )
 

@@ -4517,15 +4517,32 @@ async def generate_plan(
             chosen_families.add(_name_family(pick["name"]))
             # Reps: 12-15 light pump range for isolation finishers.
             # 2 sets keeps the time cost low (~3-5 min per finisher).
+            # The weight goes through the same entry point as every other
+            # slot (OG2-B2). It used to be None — "let the user pick a light
+            # DB" — which left a dumbbell finisher rendering as "BW" with no
+            # weight stepper, while the "Last" line beside it said 25 lb.
+            # With history this holds or progresses that weight; without,
+            # it takes the starting table, like any unseen lift.
+            fin_rating, fin_weight, fin_reps, fin_enough = (
+                await last_target_weight_for_exercise(db, pick["id"]))
+            fin_rx = next_prescription(
+                exercise=pick, reps_lo=12, reps_hi=15,
+                level=level, goal=goal,
+                avg_rating=fin_rating, avg_weight_lb=fin_weight,
+                avg_reps=fin_reps, enough=fin_enough,
+                pairs_lb=pairs_lb, wrist_weights_lb=wrist, deload=deload,
+            )
+            fin_weighted = "dumbbell" in pick["equipment"] and not pick.get("is_timed")
             plan_exs.append(ExerciseInPlan(
                 exercise_id=pick["id"],
                 order_index=len(plan_exs),
                 superset_id=None,
                 target_sets=2,
-                target_reps_low=12,
-                target_reps_high=15,
-                target_weight_lb=None,  # let the user pick a light DB
+                target_reps_low=fin_rx.reps_lo,
+                target_reps_high=fin_rx.reps_hi,
+                target_weight_lb=fin_rx.weight_lb if fin_weighted else None,
                 target_rest_s=45,
+                why=fin_rx.why if (fin_weighted or not fin_rx.about_load) else None,
             ))
             finishers_added.append(muscle)
 

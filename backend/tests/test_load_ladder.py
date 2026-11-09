@@ -98,3 +98,35 @@ def test_slot_ladder_for_a_dumbbell_lift():
     db = _first(lambda e: "dumbbell" in e["equipment"] and not e.get("is_timed"))
     ladder = _load_ladder_for(_wex(db["id"], 30.0), db, PAIRS_5S, WRISTS)
     assert ladder == load_ladder(30.0, PAIRS_5S, WRISTS)
+
+
+# ── v0.54.1: a dumbbell slot with no target ─────────────────────────────
+# Finishers were generated with target_weight_lb=None, which left a dumbbell
+# pullover rendering as "BW" with no weight stepper while its "Last" line
+# said 25 lb. A loaded slot must always be steppable.
+
+def test_untargeted_dumbbell_slot_is_anchored_on_last_time():
+    from myvitals.api.workout.strength import LastSetOut, _planned_sets, _untargeted_anchor
+    db = _first(lambda e: "dumbbell" in e["equipment"] and not e.get("is_timed"))
+    last = [LastSetOut(set_number=1, weight_lb=25.0, reps=12),
+            LastSetOut(set_number=2, weight_lb=20.0, reps=12)]
+    wex = SimpleNamespace(exercise_id=db["id"], target_weight_lb=None,
+                          target_sets=2, target_reps_low=12, target_rest_s=45)
+    assert _load_ladder_for(wex, db, PAIRS_5S, WRISTS, last) == load_ladder(25.0, PAIRS_5S, WRISTS)
+    anchor = _untargeted_anchor(wex, db, last)
+    assert anchor == 25.0
+    rows = _planned_sets(wex, [], last, None, untargeted_anchor=anchor)
+    assert [r.prefill_weight_lb for r in rows] == [25.0, 25.0]
+
+
+def test_untargeted_dumbbell_slot_without_history_gets_the_whole_rack():
+    db = _first(lambda e: "dumbbell" in e["equipment"] and not e.get("is_timed"))
+    assert _load_ladder_for(_wex(db["id"], None), db, PAIRS_5S, WRISTS) == \
+        valid_dumbbell_loads(PAIRS_5S, WRISTS)
+
+
+def test_anchor_never_overrides_a_prescription():
+    from myvitals.api.workout.strength import LastSetOut, _untargeted_anchor
+    db = _first(lambda e: "dumbbell" in e["equipment"] and not e.get("is_timed"))
+    last = [LastSetOut(set_number=1, weight_lb=25.0, reps=12)]
+    assert _untargeted_anchor(_wex(db["id"], 30.0), db, last) is None

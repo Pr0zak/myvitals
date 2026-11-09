@@ -1687,7 +1687,9 @@ const pinBarValue = computed(() => {
   const w = heroWex.value; const e = heroEntry.value;
   if (!w || !e) return "";
   if (isTimedExercise(w)) return `${w.target_reps_low}s hold`;
-  return `${e.weight.trim() || "BW"} × ${e.reps.trim() || "—"}`;
+  // "BW" only for a slot with no load at all; a dumbbell lift is "—".
+  const blank = heroLadder.value || heroTargetW.value != null ? "—" : "BW";
+  return `${e.weight.trim() || blank} × ${e.reps.trim() || "—"}`;
 });
 const pinBarRest = computed(() =>
   resting.value && !restDone.value ? `Rest ${fmtRest(Math.max(0, restRemaining.value ?? 0))}` : null,

@@ -306,7 +306,7 @@ internal fun NowMiniBar(
         isTimedExercise(wex, info) -> "${wex.targetRepsLow}s hold"
         else -> {
             val input = st.setInputs["${wex.id}-$n"] ?: seedInput(wex, n)
-            "${input.weight.ifBlank { "BW" }} × ${input.reps.ifBlank { "—" }}"
+            "${input.weight.ifBlank { blankWeight(wex) }} × ${input.reps.ifBlank { "—" }}"
         }
     }
     Row(
@@ -533,10 +533,10 @@ private fun NowHero(
         }
 
         if (resting) {
-            RestRingRow(st, nextLabel = "${input.weight.ifBlank { "BW" }} lb × ${input.reps}",
+            RestRingRow(st, nextLabel = "${input.weight.ifBlank { blankWeight(wex) }} lb × ${input.reps}",
                 nextExercise = name.takeIf { from != null })
         } else {
-            TargetReadout(input.weight, input.reps, onTap = { editOpen = true })
+            TargetReadout(input.weight, input.reps, blank = blankWeight(wex), onTap = { editOpen = true })
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 val ladder = wex.loadLadderLb?.takeIf { it.isNotEmpty() }
@@ -780,15 +780,22 @@ internal fun nextWeight(current: String, target: Double?, ladder: List<Double>?,
     else ladder.lastOrNull { it < base - 0.01 }
 }
 
+/** What a blank weight reads as. "BW" only for a slot that carries no load
+ *  (no ladder, no target); a dumbbell exercise without a typed weight is
+ *  "—", never "BW" — the server sends a ladder for every loaded slot. */
+internal fun blankWeight(wex: StrengthWorkoutExerciseRow): String =
+    if (wex.loadLadderLb.isNullOrEmpty() && wex.targetWeightLb == null) "BW" else "—"
+
 /** "47.5 lb × 8" — tap to type. */
 @Composable
-private fun TargetReadout(weight: String, reps: String, onTap: () -> Unit) {
+private fun TargetReadout(weight: String, reps: String, blank: String = "BW", onTap: () -> Unit) {
     val big = SpanStyle(fontSize = 40.sp, fontWeight = FontWeight.Bold, color = NeonMV.Ink)
     val small = SpanStyle(fontSize = 18.sp, fontWeight = FontWeight.Medium, color = NeonMV.Muted)
     Text(
         buildAnnotatedString {
             if (weight.isBlank()) {
-                withStyle(big) { append("BW") }
+                withStyle(big) { append(blank) }
+                if (blank != "BW") withStyle(small) { append(" lb") }
             } else {
                 withStyle(big) { append(weight) }
                 withStyle(small) { append(" lb") }

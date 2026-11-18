@@ -182,3 +182,16 @@ def test_back_to_sleep_joins_the_night_but_a_nap_does_not() -> None:
 
 def test_chain_night_empty() -> None:
     assert chain_night([]) == []
+
+
+def test_a_day_without_a_session_does_not_borrow_yesterdays_night(monkeypatch) -> None:
+    """2026-11-08 had no session; the fallback found 11-07's (ending 07:15
+    local on the 7th) and copied its RHR and HRV."""
+    from datetime import date
+
+    from myvitals.analytics import baselines
+    from myvitals.config import settings
+
+    monkeypatch.setattr(settings, "tz", "America/Chicago")
+    start, _end = baselines._fallback_search(date(2026, 11, 8))
+    assert _t(13, 15, day=7) < start

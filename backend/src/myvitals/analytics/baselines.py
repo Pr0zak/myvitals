@@ -84,14 +84,10 @@ async def _resolve_night_bounds(db: AsyncSession, day: date) -> tuple[datetime, 
     if spans:
         return spans[0][0], spans[-1][1]
 
-    local_tz = _local_tz()
-    day_start = datetime.combine(day, time.min, tzinfo=local_tz)
-    day_end = datetime.combine(day, time.max, tzinfo=local_tz)
-    search_start = day_start - timedelta(hours=18)
-
+    day_start, day_end = _fallback_search(day)
     sess = (await db.execute(
         select(models.SleepSession)
-        .where(models.SleepSession.end_at >= search_start)
+        .where(models.SleepSession.end_at >= day_start)
         .where(models.SleepSession.end_at <= day_end)
         .order_by((models.SleepSession.end_at - models.SleepSession.start_at).desc())
         .limit(1)
@@ -100,6 +96,22 @@ async def _resolve_night_bounds(db: AsyncSession, day: date) -> tuple[datetime, 
         return sess.start_at, sess.end_at
 
     return _night_window(day)
+
+
+def _fallback_search(day: date) -> tuple[datetime, datetime]:
+    """Where the fallback looks for a session for the night ending on `day`:
+    one that ENDS on `day`, local time.
+
+    This used to reach back 18 h before local midnight, into the previous
+    morning. A day with no session of its own then borrowed the previous
+    night's session, and its RHR and HRV were copies of the day before
+    (2026-10-17 = 10-16, 10-29 = 10-28, 10-31 = 10-30, and 11-08 = 11-07
+    once the 11-07 session was repaired to end at 13:15 UTC). A night with
+    nothing recorded must read as missing, not as yesterday.
+    """
+    local_tz = _local_tz()
+    return (datetime.combine(day, time.min, tzinfo=local_tz),
+            datetime.combine(day, time.max, tzinfo=local_tz))
 
 
 async def nightly_rhr(db: AsyncSession, day: date) -> float | None:

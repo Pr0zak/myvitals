@@ -1,10 +1,11 @@
 import logging
 from collections.abc import Iterable, Iterator
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -232,7 +233,11 @@ class Batch(BaseModel):
 
 
 @router.post("/batch")
-async def ingest_batch(batch: Batch, db: AsyncSession = Depends(get_session)) -> dict[str, int]:
+async def ingest_batch(
+    batch: Batch,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, int]:
     counts: dict[str, int] = {}
 
     if batch.heartrate:
@@ -339,16 +344,96 @@ async def ingest_batch(batch: Batch, db: AsyncSession = Depends(get_session)) ->
                            (b.model_dump() for b in batch.blood_pressure), ["time"])
         counts["blood_pressure"] = len(batch.blood_pressure)
 
+    grown_session_ends: list[datetime] = []
     if batch.sleep_sessions:
         rows = [
             {"start_at": s.start, "end_at": s.end, "source": s.source, "title": s.title}
             for s in batch.sleep_sessions
         ]
-        await _bulk_upsert(db, models.SleepSession, rows, ["start_at"])
+        grown_session_ends = await _upsert_sleep_sessions(db, rows)
         counts["sleep_sessions"] = len(rows)
 
     await db.commit()
+    if grown_session_ends:
+        background.add_task(_recompute_nights, grown_session_ends)
     return counts
+
+
+def sleep_session_upsert(rows: list[dict[str, Any]]):
+    """INSERT ... ON CONFLICT for sleep sessions that lets a session GROW.
+
+    The watch writes a session while the night is still going and rewrites
+    it with a later end once the user is finally up, keeping the same start.
+    This used to be DO NOTHING on `start_at`, so the first, shorter version
+    won forever: on 2026-11-15 the session stayed 03:17-04:58 UTC while its
+    stages ran to 13:09, and the night read 1.5 h of sleep. 37 nights
+    between May and November 2026 lost hours this way.
+
+    The end only ever moves LATER (GREATEST). The phone replays failed posts
+    from its Room buffer oldest-first, so an old, shorter snapshot can arrive
+    after the full one and must not shrink the night again. RETURNING gives
+    back only rows inserted or actually extended, so the caller knows which
+    nights to recompute.
+    """
+    tbl = models.SleepSession.__table__
+    stmt = insert(models.SleepSession).values(rows)
+    return stmt.on_conflict_do_update(
+        index_elements=["start_at"],
+        set_={
+            "end_at": func.greatest(tbl.c.end_at, stmt.excluded.end_at),
+            "title": func.coalesce(stmt.excluded.title, tbl.c.title),
+        },
+        where=stmt.excluded.end_at > tbl.c.end_at,
+    ).returning(tbl.c.end_at)
+
+
+async def _upsert_sleep_sessions(
+    db: AsyncSession, rows: list[dict[str, Any]],
+) -> list[datetime]:
+    """Upsert sessions; return the end of every session inserted or grown."""
+    deduped = _dedupe_on_conflict_key(
+        rows, ["start_at"], "sleep_sessions", keep_last=True,
+    )
+    # Within one batch keep the LATEST end for a start, not the last row:
+    # the same rule GREATEST applies across batches.
+    latest: dict[Any, datetime] = {}
+    for r in rows:
+        k = r["start_at"]
+        latest[k] = max(latest.get(k, r["end_at"]), r["end_at"])
+    for r in deduped:
+        r["end_at"] = latest[r["start_at"]]
+    ends: list[datetime] = []
+    for chunk in _chunked(deduped):
+        res = await db.execute(sleep_session_upsert(chunk))
+        ends.extend(res.scalars().all())
+    return ends
+
+
+async def _recompute_nights(session_ends: list[datetime]) -> None:
+    """Recompute the daily summary for each night a new or longer session
+    belongs to.
+
+    The lazy recompute in /summary only fires when a day's sleep or HRV is
+    NULL. A night that already had a (too short) value never looked stale,
+    so a session growing after the first sync left the day wrong for good.
+    Oldest first, because training load seeds each day off the one before.
+    """
+    from ..analytics.jobs import compute_daily_summary
+    from ..analytics.sleep import _night_window
+    from .summary import _lazy_compute_lock
+
+    days: set = set()
+    for end in session_ends:
+        for cand in (end.date(), end.date() + timedelta(days=1)):
+            start, stop = _night_window(cand)
+            if start <= end <= stop:
+                days.add(cand)
+    async with _lazy_compute_lock:
+        for d in sorted(days):
+            try:
+                await compute_daily_summary(d)
+            except Exception as e:  # noqa: BLE001
+                log.warning("recompute after session growth %s failed: %s", d, e)
 
 
 class Heartbeat(BaseModel):

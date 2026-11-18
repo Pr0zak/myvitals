@@ -50,6 +50,10 @@ class _SessionLookup:
             def scalar_one_or_none(_self):
                 return row
 
+            def all(_self):
+                # `night_session_spans` asks for (start_at, end_at) pairs.
+                return [] if row is None else [(row.start_at, row.end_at)]
+
         return _Result()
 
 

@@ -43,50 +43,130 @@ def _night_window(day: date) -> tuple[datetime, datetime]:
     return start, end
 
 
+def merge_intervals(
+    intervals: list[tuple[datetime, datetime]],
+) -> list[tuple[datetime, datetime]]:
+    """Union of possibly-overlapping (start, end) spans, sorted by start."""
+    out: list[tuple[datetime, datetime]] = []
+    for start, end in sorted(intervals):
+        if out and start <= out[-1][1]:
+            out[-1] = (out[-1][0], max(out[-1][1], end))
+        else:
+            out.append((start, end))
+    return out
+
+
+def sum_stages_in(
+    rows: list[tuple[datetime, str, int]],
+    spans: list[tuple[datetime, datetime]],
+) -> dict[str, int]:
+    """Sum stage durations that fall inside `spans`.
+
+    `rows` are (time, stage, duration_s) sorted by time. Each stage is
+    clamped to the gap before the next stage starts (overlapping rows from
+    multiple writers must not inflate the night) and to the end of the span
+    it starts in. A stage starting outside every span is not counted.
+    """
+    by_stage: dict[str, int] = {}
+    for i, (ts, stage, dur) in enumerate(rows):
+        span = next((s for s in spans if s[0] <= ts <= s[1]), None)
+        if span is None:
+            continue
+        limit = span[1]
+        if i + 1 < len(rows) and rows[i + 1][0] < limit:
+            limit = rows[i + 1][0]
+        clamped = min(dur, max(0, int((limit - ts).total_seconds())))
+        by_stage[stage] = by_stage.get(stage, 0) + clamped
+    return by_stage
+
+
+# How far a session may sit from the main sleep and still be the same night.
+# Measured on production sessions March-November 2026: going back to sleep
+# after waking left gaps of 2.3-3.5 h; the eleven afternoon/evening naps all
+# ended 3.6 h or more before bedtime. Back-to-sleep gaps after the main
+# session are therefore allowed up to 4 h; a session BEFORE it must sit
+# within 2 h, which keeps every one of those naps out.
+CHAIN_GAP_AFTER = timedelta(hours=4)
+CHAIN_GAP_BEFORE = timedelta(hours=2)
+
+
+def chain_night(
+    sessions: list[tuple[datetime, datetime]],
+) -> list[tuple[datetime, datetime]]:
+    """The longest session plus every session chained to it, merged.
+
+    Pure. A session joins when it starts within CHAIN_GAP_AFTER of the
+    chain's end, or ends within CHAIN_GAP_BEFORE of the chain's start.
+    """
+    sessions = sorted((s, e) for s, e in sessions if e > s)
+    if not sessions:
+        return []
+    anchor = max(sessions, key=lambda x: x[1] - x[0])
+    chosen = [anchor]
+    lo, hi = anchor
+    for s, e in sessions:
+        if s > anchor[0] and s - hi <= CHAIN_GAP_AFTER:
+            chosen.append((s, e))
+            hi = max(hi, e)
+    for s, e in reversed(sessions):
+        if s < anchor[0] and lo - e <= CHAIN_GAP_BEFORE:
+            chosen.append((s, e))
+            lo = min(lo, s)
+    return merge_intervals(chosen)
+
+
+async def night_session_spans(
+    db: AsyncSession, day: date,
+) -> list[tuple[datetime, datetime]]:
+    """The canonical sessions that make up the night ending on `day`,
+    merged into non-overlapping spans.
+
+    The watch splits a broken night into several sessions. This used to
+    keep only the LONGEST one, so the rest of the night counted for
+    nothing: the night ending 2026-11-17 had sessions 04:06-08:51 and
+    10:46-13:30 UTC and read 4.7 h, the second 2.7 h ignored. Taking every
+    session in the window instead would sweep in afternoon naps, because
+    the window opens at 18:00 UTC the day before; `chain_night` keeps only
+    sessions close to the main sleep.
+    """
+    night_start, night_end = _night_window(day)
+    sessions = (await db.execute(
+        select(models.SleepSession.start_at, models.SleepSession.end_at)
+        .where(models.SleepSession.end_at >= night_start)
+        .where(models.SleepSession.end_at <= night_end)
+    )).all()
+    return chain_night([(s, e) for s, e in sessions])
+
+
 async def _stages_for_night(db: AsyncSession, day: date) -> dict[str, int]:
     """Sum stage durations for the night ending on `day`.
 
-    Prefer the canonical SleepSession boundary when one exists (HC /
-    Fitbit / Garmin all ship session start+end). For a session, we sum
-    stage durations only within the session window AND clamp each
-    stage's duration to the gap before the next stage starts so
-    overlapping rows from multiple imports don't inflate the night.
+    Prefer the canonical SleepSession boundaries when any exist (HC /
+    Fitbit / Garmin all ship session start+end): stages are summed only
+    inside the night's sessions (all of them, see `night_session_spans`),
+    each clamped to the gap before the next stage starts so overlapping
+    rows from multiple imports don't inflate the night.
 
-    Falls back to the older 20:00→12:00 window for nights without a
+    Falls back to the older 18:00 -> 14:00 UTC window for nights without a
     canonical session row.
     """
-    night_start, night_end = _night_window(day)
-
-    # 1. Most relevant canonical session (one whose end falls in the night
-    # window). Take the longest if multiple.
-    sess = (await db.execute(
-        select(models.SleepSession)
-        .where(models.SleepSession.end_at >= night_start)
-        .where(models.SleepSession.end_at <= night_end)
-        .order_by((models.SleepSession.end_at - models.SleepSession.start_at).desc())
-        .limit(1)
-    )).scalar_one_or_none()
-    if sess is not None:
+    spans = await night_session_spans(db, day)
+    if spans:
         rows = (await db.execute(
             select(models.SleepStage.time, models.SleepStage.stage, models.SleepStage.duration_s)
-            .where(models.SleepStage.time >= sess.start_at)
-            .where(models.SleepStage.time <= sess.end_at)
+            .where(models.SleepStage.time >= spans[0][0])
+            .where(models.SleepStage.time <= spans[-1][1])
             .order_by(models.SleepStage.time)
         )).all()
-        by_stage: dict[str, int] = {}
-        for i, (ts, stage, dur) in enumerate(rows):
-            if i + 1 < len(rows):
-                clamped = min(dur, max(0, int((rows[i + 1][0] - ts).total_seconds())))
-            else:
-                clamped = min(dur, max(0, int((sess.end_at - ts).total_seconds())))
-            by_stage[stage] = by_stage.get(stage, 0) + clamped
-        # If stages weren't tagged for this night, attribute the entire
-        # session to "light" so duration is still right.
+        by_stage = sum_stages_in([tuple(r) for r in rows], spans)
+        # If stages weren't tagged for this night, attribute the sessions
+        # to "light" so duration is still right.
         if not by_stage:
-            by_stage["light"] = int((sess.end_at - sess.start_at).total_seconds())
+            by_stage["light"] = int(sum((e - s).total_seconds() for s, e in spans))
         return by_stage
 
     # 2. Fallback: stage-walk (overlap-clamped to be defensible).
+    night_start, night_end = _night_window(day)
     rows = (await db.execute(
         select(models.SleepStage.time, models.SleepStage.stage, models.SleepStage.duration_s)
         .where(models.SleepStage.time >= night_start)

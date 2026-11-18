@@ -119,6 +119,14 @@ def test_no_upsert_bypasses_the_helper() -> None:
     bodies = src.split("async def _bulk_upsert", 1)
     assert len(bodies) == 2
     outside = bodies[0] + bodies[1].split("\nclass ", 1)[-1]
+    # The one sanctioned exception: sleep sessions need GREATEST on end_at
+    # and RETURNING, which _bulk_upsert cannot express. Its caller must run
+    # the same de-dup first.
+    sanctioned = outside.split("def sleep_session_upsert", 1)
+    if len(sanctioned) == 2:
+        outside = sanctioned[0] + sanctioned[1].split("\nasync def ", 1)[-1]
+        caller = src.split("async def _upsert_sleep_sessions", 1)[1].split("\nasync def ", 1)[0]
+        assert "_dedupe_on_conflict_key(" in caller
     assert "on_conflict_do_update" not in outside, (
         "route ingest upserts through _bulk_upsert so they inherit the de-dup"
     )

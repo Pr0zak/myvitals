@@ -27,6 +27,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import models
+from .sleep import night_session_spans
 
 
 def _local_tz():
@@ -68,12 +69,21 @@ def _night_window(day: date) -> tuple[datetime, datetime]:
 async def _resolve_night_bounds(db: AsyncSession, day: date) -> tuple[datetime, datetime]:
     """The night ending on `day`, for computing an actual RHR/HRV value.
 
-    Prefers the canonical SleepSession boundary when one exists — mirrors
-    `sleep.py:_stages_for_night`'s search (a generous local-day-plus-reach-back
-    window used only to LOCATE the session; the session's own start_at/end_at,
-    not this search window, become the actual RHR/HRV bounds). Falls back to
-    `_night_window(day)` for nights without a canonical session row.
+    Prefers the canonical sleep sessions. When the watch split the night
+    into several sessions, the bounds span all of them (first start to last
+    end) -- the same set `sleep.py:night_session_spans` counts for sleep
+    duration, so RHR, HRV and sleep describe the same night. Taking only
+    the longest session cut off the end of broken nights, and Google stamps
+    its one nightly HRV record at the END of the night, so the reading fell
+    outside the window and the night had no HRV at all.
+
+    Falls back to the longest session found by a generous local-day search,
+    then to `_night_window(day)` for nights without a session row.
     """
+    spans = await night_session_spans(db, day)
+    if spans:
+        return spans[0][0], spans[-1][1]
+
     local_tz = _local_tz()
     day_start = datetime.combine(day, time.min, tzinfo=local_tz)
     day_end = datetime.combine(day, time.max, tzinfo=local_tz)
@@ -128,6 +138,18 @@ async def nightly_rhr(db: AsyncSession, day: date) -> float | None:
     return await _google_health_daily(db, day, "resting_hr")
 
 
+# How long after the night's last session a reading still counts as that
+# night's. Since 2026-11-05 Google writes ONE HRV record per night instead of
+# one every few minutes, stamped at the moment the session ends (Nov 6-18:
+# each reading sits exactly on a session end, including the later ends of
+# sessions the ingest used to drop -- see api/ingest.py). The window
+# is inclusive, so that normally lands inside it; the grace covers a reading
+# stamped a little after the session row we hold, e.g. when the phone synced
+# an earlier, shorter version of the session. Used only when the night
+# itself has no reading, so it never mixes daytime values into a real one.
+HRV_WAKE_GRACE = timedelta(minutes=45)
+
+
 async def nightly_hrv(db: AsyncSession, day: date) -> float | None:
     """Mean RMSSD during the sleep window for the night ending on `day`."""
     start, end = await _resolve_night_bounds(db, day)
@@ -135,6 +157,14 @@ async def nightly_hrv(db: AsyncSession, day: date) -> float | None:
         select(func.avg(models.Hrv.rmssd_ms))
         .where(models.Hrv.time >= start)
         .where(models.Hrv.time <= end)
+    )
+    val = result.scalar()
+    if val is not None:
+        return float(val)
+    result = await db.execute(
+        select(func.avg(models.Hrv.rmssd_ms))
+        .where(models.Hrv.time > end)
+        .where(models.Hrv.time <= end + HRV_WAKE_GRACE)
     )
     val = result.scalar()
     if val is not None:

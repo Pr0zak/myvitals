@@ -812,6 +812,12 @@ class WorkoutExerciseOut(BaseModel):
     # openGym's rule for the same case and the same reason the shopping list
     # flags an uncostable line instead of dropping it.
     equipment_missing: bool = False
+    # The user's standing preference for this exercise ("favorite", "avoid",
+    # "disabled"), or null for neutral. Read from user_equipment at
+    # serialization time so a pref set mid-workout shows on the next reload.
+    # Before this, the workout screens let you SET a preference but never
+    # showed the current one; only the catalog did.
+    pref: str | None = None
     # UI-F4: the loadable per-dumbbell weights around target_weight_lb,
     # ascending, at most ~10 either side — what the logger's +/- steppers
     # walk instead of a fixed 2.5 lb. A window onto the same load set the
@@ -1234,7 +1240,11 @@ def _wex_to_out(
     last_sets: list[LastSetOut] | None = None,
     program_by_id: dict[str, dict] | None = None,
     equipment: dict[str, Any] | None = None,
+    prefs: dict[str, str] | None = None,
 ) -> WorkoutExerciseOut:
+    if prefs is None and equipment is not None:
+        prefs = equipment.get("exercise_prefs") or {}
+    pref = (prefs or {}).get(wex.exercise_id)
     prog = (program_by_id or {}).get(wex.exercise_id)
     meta = _CATALOG_BY_ID.get(wex.exercise_id)
     # Unknown to the catalog means unjudgeable, not undoable — an imported or
@@ -1264,6 +1274,7 @@ def _wex_to_out(
         skipped=bool(wex.skipped),
         added_ad_hoc=bool(getattr(wex, "added_ad_hoc", False)),
         equipment_missing=missing_kit,
+        pref=pref if pref in ("favorite", "avoid", "disabled") else None,
         load_ladder_lb=_load_ladder_for(wex, meta, pairs_lb, wrist_lb, last_sets),
         planned_sets=_planned_sets(
             wex, sets, last_sets, prog,
@@ -2772,7 +2783,8 @@ async def swap_exercise(
         select(models.StrengthSet)
         .where(models.StrengthSet.workout_exercise_id == wex.id)
     )).scalars().all()
-    return _wex_to_out(wex, sets, pairs, wrist)
+    return _wex_to_out(wex, sets, pairs, wrist,
+                       prefs=equip.get("exercise_prefs") or {})
 
 
 @router.delete("/sets/{set_id}", response_model=WorkoutOut)

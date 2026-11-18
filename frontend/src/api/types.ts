@@ -420,6 +420,8 @@ export interface StrengthWorkoutExercise {
   /** OG2-A6: needs equipment no longer owned. Only ever set on a plan that
    *  could not be regenerated (in progress, or with logged sets). */
   equipment_missing?: boolean;
+  /** Standing preference: "favorite" | "avoid" | "disabled"; null = neutral. */
+  pref?: string | null;
   // TD-6: one row per prescribed set, with the prefill resolved server-side.
   // Render these — do NOT derive starting values locally. The two surfaces
   // used to seed the inputs differently for the same workout.

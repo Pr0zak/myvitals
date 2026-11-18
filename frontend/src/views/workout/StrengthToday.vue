@@ -5,13 +5,13 @@
  * with set logging + rest timer), completed (summary).
  */
 import { toLocalISO } from "@/dates";
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, h, onMounted, onUnmounted, ref, watch } from "vue";
 import { releaseWakeLock, requestWakeLock } from "@/wakeLock";
 import BodyMap from "@/components/BodyMap.vue";
 import { useRouter } from "vue-router";
 import {
   Play, Pause, RotateCw, Plus, Minus, Check, MoreVertical, Sparkles, Hourglass,
-  Feather, Info, ChevronDown, ChevronRight, ArrowLeftRight,
+  Feather, Info, ChevronDown, ChevronRight, ArrowLeftRight, Star, ThumbsDown, Ban,
 } from "lucide-vue-next";
 import NeonPage from "@/components/neon/NeonPage.vue";
 import NeonHero from "@/components/neon/NeonHero.vue";
@@ -45,6 +45,41 @@ function muscleGroupsFor(focus: string): string {
   return m[focus.toLowerCase()] ?? focus.replace(/_/g, " ");
 }
 const workout = ref<StrengthWorkoutDetail | null>(null);
+
+// Exercise preference, set from the workout card. Shown at once on every slot
+// holding that exercise; the server returns the same on the next load.
+type PrefValue = "neutral" | "favorite" | "avoid" | "disabled";
+const prefBusy = ref<string | null>(null);
+async function setPref(exerciseId: string, pref: PrefValue) {
+  const w = workout.value;
+  if (!w) return;
+  const before = w.exercises.map((e) => e.pref ?? null);
+  const shown = pref === "neutral" ? null : pref;
+  w.exercises.forEach((e) => { if (e.exercise_id === exerciseId) e.pref = shown; });
+  prefBusy.value = exerciseId;
+  try {
+    await api.setExercisePref(exerciseId, pref);
+  } catch (e) {
+    w.exercises.forEach((ex, i) => { ex.pref = before[i]; });
+    error.value = `Preference not saved: ${(e as Error).message ?? e}`;
+  } finally {
+    prefBusy.value = null;
+  }
+}
+
+/** Favourite / avoid marker beside an exercise name. Same colours as the
+ *  catalog: amber star, muted thumb; nothing for neutral. */
+const PrefMark = (props: { pref?: string | null; size?: number }) => {
+  const size = props.size ?? 16;
+  if (props.pref === "favorite")
+    return h(Star, { size, class: "pref-mark fav", fill: "currentColor", "aria-label": "Favorite" });
+  if (props.pref === "avoid")
+    return h(ThumbsDown, { size, class: "pref-mark", "aria-label": "Avoided" });
+  if (props.pref === "disabled")
+    return h(Ban, { size, class: "pref-mark", "aria-label": "Disabled" });
+  return null;
+};
+PrefMark.props = ["pref", "size"];
 const recovery = ref<Awaited<ReturnType<typeof api.strengthRecovery>> | null>(null);
 const catalogById = ref<Record<string, StrengthExercise>>({});
 const loading = ref(true);
@@ -2113,7 +2148,7 @@ useVisibilityRefresh(loadAll);
                  :style="`-webkit-mask-image: url('${imageUrl(heroWex.exercise_id, 0)}'); mask-image: url('${imageUrl(heroWex.exercise_id, 0)}')`" />
           </a>
           <div class="now-title-text">
-            <h2 class="now-name">{{ exName(heroWex.exercise_id) }}</h2>
+            <h2 class="now-name">{{ exName(heroWex.exercise_id) }}<PrefMark :pref="heroWex.pref" :size="18" /></h2>
             <div class="now-rx">{{ prescriptionLine(heroWex) }}</div>
           </div>
         </div>
@@ -2398,7 +2433,7 @@ useVisibilityRefresh(loadAll);
           </div>
           <header class="ex-head">
             <div class="ex-title">
-              <h3>{{ exPos(c.wex) }}. {{ exName(c.wex.exercise_id) }}</h3>
+              <h3>{{ exPos(c.wex) }}. {{ exName(c.wex.exercise_id) }}<PrefMark :pref="c.wex.pref" :size="15" /></h3>
               <div class="tags">
                 <!-- TD-10 / OG2-A6: plan vs improvisation, and kit no longer owned. -->
                 <span v-if="c.wex.added_ad_hoc" class="tag cyan"
@@ -2442,6 +2477,15 @@ useVisibilityRefresh(loadAll);
             </template>
             <button v-if="c.wex.added_ad_hoc && !isSlotClosed(c.wex) && c.wex.sets.length === 0"
                     class="act" title="Remove this exercise" @click="removeExercise(c.wex.id)">Remove</button>
+            <!-- The standing preference, showing the one in force. -->
+            <select class="act pref-select" :value="c.wex.pref ?? 'neutral'"
+                    aria-label="Exercise preference" :disabled="prefBusy === c.wex.exercise_id"
+                    @change="setPref(c.wex.exercise_id, ($event.target as HTMLSelectElement).value as PrefValue)">
+              <option value="favorite">★ Favorite</option>
+              <option value="neutral">Neutral</option>
+              <option value="avoid">Avoid</option>
+              <option value="disabled">Disable</option>
+            </select>
             <button v-if="(isSlotClosed(c.wex) || heroWex?.id === c.wex.id) && !isEditingExercise(c.wex)"
                     class="act" :aria-expanded="true" @click="toggleExpanded(c.wex.id)">Collapse</button>
           </div>
@@ -3032,6 +3076,9 @@ useVisibilityRefresh(loadAll);
   border-radius: 6px; }
 .tag.cyan { background: rgba(40, 230, 255, .12); }
 .tag.amber { background: rgba(255, 181, 46, .12); }
+.pref-mark { display: inline-block; vertical-align: -2px; margin-left: 6px; color: var(--rn-mut); }
+.pref-mark.fav { color: #ffb52e; }
+.pref-select { appearance: auto; background: transparent; color: var(--rn-ink); border: 1px solid var(--rn-line); font: inherit; font-size: 13px; }
 .prescription { font-family: 'Space Grotesk', monospace; font-size: 12.5px; color: var(--rn-mut); margin-top: 3px; }
 .prescription .rest { opacity: .8; }
 .side-label { font-weight: 600; }

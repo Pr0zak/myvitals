@@ -306,6 +306,9 @@ data class StrengthWorkoutExerciseRow(
     // OG2-A6: needs equipment no longer owned. Defaults false so an older
     // server that omits the key reads as "fine" rather than crashing Moshi.
     @Json(name = "equipment_missing") val equipmentMissing: Boolean = false,
+    // The standing preference: "favorite" | "avoid" | "disabled", null for
+    // neutral (and from an older server that omits the key).
+    val pref: String? = null,
     // TD-6: one row per prescribed set, with the prefill resolved
     // server-side. Render these — do NOT derive starting values here. This
     // screen and StrengthToday.vue used to seed the inputs from different

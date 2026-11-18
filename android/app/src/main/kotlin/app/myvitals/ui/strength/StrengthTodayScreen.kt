@@ -102,6 +102,8 @@ import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.ThumbDownOffAlt
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Star
 import app.myvitals.sync.BackendClient
 import app.myvitals.sync.ExercisePrefBody
 import app.myvitals.sync.LogSetRequest
@@ -639,6 +641,14 @@ fun StrengthTodayScreen(
                         api.setExercisePref(exerciseId, ExercisePrefBody(pref))
                     }
                     Timber.i("exercise pref set: %s = %s", exerciseId, pref)
+                    // Show the new choice at once; the server answers the
+                    // same on the next reload.
+                    val shown = pref.takeIf { it != "neutral" }
+                    st.workout = st.workout?.let { w ->
+                        w.copy(exercises = w.exercises.map {
+                            if (it.exerciseId == exerciseId) it.copy(pref = shown) else it
+                        })
+                    }
                     st.error = null
                 } catch (e: Exception) {
                     Timber.w(e, "set exercise pref failed")
@@ -2329,10 +2339,17 @@ internal fun ExerciseCard(
         }
         Row(verticalAlignment = Alignment.Top) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "${wex.orderIndex + 1}. $name",
-                    color = pal.ink, fontSize = 17.sp, fontWeight = FontWeight.Bold,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "${wex.orderIndex + 1}. $name",
+                        color = pal.ink, fontSize = 17.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (wex.pref != null) {
+                        Spacer(Modifier.width(6.dp))
+                        PrefMark(wex.pref)
+                    }
+                }
                 // TD-10: keep the plan and its improvisations distinguishable.
                 if (wex.addedAdHoc) {
                     Text("Added by you", color = pal.accent, fontSize = 12.sp,
@@ -2388,7 +2405,7 @@ internal fun ExerciseCard(
                     enabled = !skipLocked) { onSkipChange(true) }
             }
             Spacer(Modifier.weight(1f))
-            ExercisePrefMenu(onSetPref)
+            ExercisePrefMenu(wex.pref, onSetPref)
         }
         // A skip refusal (409 "N set(s) already logged") belongs here, verbatim.
         skipError?.let { Text(it, color = pal.caution, fontSize = 12.sp) }
@@ -3265,7 +3282,7 @@ internal fun lastSetsWhen(sets: List<app.myvitals.sync.LastSet>): String? {
 }
 
 @Composable
-internal fun ExercisePrefMenu(onSetPref: (String) -> Unit) {
+internal fun ExercisePrefMenu(current: String? = null, onSetPref: (String) -> Unit) {
     val pal = LocalStrengthPalette.current
     var open by remember { mutableStateOf(false) }
     Box {
@@ -3291,6 +3308,7 @@ internal fun ExercisePrefMenu(onSetPref: (String) -> Unit) {
                 },
                 text = { Text("Favorite — show more often") },
                 onClick = { open = false; onSetPref("favorite") },
+                trailingIcon = { PrefCheck(current == "favorite") },
             )
             androidx.compose.material3.DropdownMenuItem(
                 leadingIcon = {
@@ -3303,6 +3321,7 @@ internal fun ExercisePrefMenu(onSetPref: (String) -> Unit) {
                 },
                 text = { Text("Avoid — show less often") },
                 onClick = { open = false; onSetPref("avoid") },
+                trailingIcon = { PrefCheck(current == "avoid") },
             )
             androidx.compose.material3.DropdownMenuItem(
                 leadingIcon = {
@@ -3315,6 +3334,7 @@ internal fun ExercisePrefMenu(onSetPref: (String) -> Unit) {
                 },
                 text = { Text("Disable — never include") },
                 onClick = { open = false; onSetPref("disabled") },
+                trailingIcon = { PrefCheck(current == "disabled") },
             )
             androidx.compose.material3.DropdownMenuItem(
                 leadingIcon = {
@@ -3325,8 +3345,9 @@ internal fun ExercisePrefMenu(onSetPref: (String) -> Unit) {
                         tint = pal.ink,
                     )
                 },
-                text = { Text("Reset to neutral") },
+                text = { Text("Neutral") },
                 onClick = { open = false; onSetPref("neutral") },
+                trailingIcon = { PrefCheck(current == null) },
             )
         }
     }
@@ -3693,4 +3714,32 @@ private fun buildWorkoutShareText(
     if (!w.notes.isNullOrBlank()) sb.append("\n${w.notes}")
     sb.append("\n\n— myvitals")
     return sb.toString()
+}
+
+
+/** A tick beside the preference currently in force, in the ⋮ menu. */
+@Composable
+private fun PrefCheck(on: Boolean) {
+    if (on) Icon(
+        Icons.Filled.Check, contentDescription = "Current",
+        modifier = Modifier.size(18.dp), tint = LocalStrengthPalette.current.accent,
+    )
+}
+
+/** Favourite / avoid marker beside an exercise's name during a workout.
+ *  Same colours as the catalog: amber star for a favourite, a muted thumb
+ *  for an avoided one, nothing for neutral. A disabled exercise is never
+ *  generated, but one added by hand or disabled mid-session shows a block. */
+@Composable
+internal fun PrefMark(pref: String?, size: androidx.compose.ui.unit.Dp = 16.dp) {
+    val pal = LocalStrengthPalette.current
+    when (pref) {
+        "favorite" -> Icon(Icons.Filled.Star, contentDescription = "Favorite",
+            tint = NeonMV.Amber, modifier = Modifier.size(size))
+        "avoid" -> Icon(Icons.Outlined.ThumbDownOffAlt, contentDescription = "Avoided",
+            tint = pal.muted, modifier = Modifier.size(size))
+        "disabled" -> Icon(Icons.Outlined.Block, contentDescription = "Disabled",
+            tint = pal.muted, modifier = Modifier.size(size))
+        else -> Unit
+    }
 }

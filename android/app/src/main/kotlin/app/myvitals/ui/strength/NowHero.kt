@@ -498,7 +498,13 @@ private fun NowHero(
         Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             ExerciseThumb(wex, info, backendBaseUrl, size = 56.dp, trailingGap = 12.dp) { infoOpen = true }
             Column(Modifier.weight(1f)) {
-                HeroTitle(name, maxLines = 2)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f, fill = false)) { HeroTitle(name, maxLines = 2) }
+                    if (wex.pref != null) {
+                        Spacer(Modifier.width(6.dp))
+                        PrefMark(wex.pref, size = 20.dp)
+                    }
+                }
                 Text(prescriptionLine(wex, info), color = NeonMV.Muted, fontSize = 13.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
@@ -727,7 +733,7 @@ private fun HeroExerciseFooter(
             ) { actions.skipExercise(wex, true) }
         }
         Spacer(Modifier.weight(1f))
-        ExercisePrefMenu { pref -> actions.setPref(wex.exerciseId, pref) }
+        ExercisePrefMenu(wex.pref) { pref -> actions.setPref(wex.exerciseId, pref) }
     }
     st.skipError?.takeIf { it.first == wex.id }?.second?.let {
         Text(it, color = NeonMV.Amber, fontSize = 12.sp)
